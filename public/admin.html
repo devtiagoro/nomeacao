@@ -7,17 +7,17 @@
     <meta name="robots" content="noindex" />
     <meta name="theme-color" content="#0f4c5c" />
     <meta name="color-scheme" content="light dark" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/css/style.css" />
-    <link rel="stylesheet" href="/css/admin.css" />
-    <script type="module" src="/js/admin.js"></script>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/admin.css" />
+    <script type="module" src="js/admin.js"></script>
   </head>
   <body class="page-admin">
     <a class="skip-link" href="#main">Pular para o conteúdo</a>
     <header class="app-header">
       <div class="admin-header-left">
-        <a class="brand" href="/admin.html" aria-label="Nomeia — todas as reuniões">
+        <a class="brand" href="admin.html" aria-label="Nomeia — todas as reuniões">
           <span class="brand-mark"><span data-icon="check"></span></span><span class="brand-text">Nomeia</span>
         </a>
         <div id="hdr-meeting" class="hdr-meeting" hidden>
@@ -86,7 +86,7 @@
                   <input id="m-name" type="text" required maxlength="120" placeholder="Ex.: Assembleia geral ordinária" />
                 </div>
                 <div class="field">
-                  <label for="m-expected">Participantes previstos</label>
+                  <label for="m-expected">Pessoas presentes</label>
                   <input id="m-expected" type="number" required min="1" max="100000" inputmode="numeric" placeholder="Ex.: 40" />
                 </div>
               </div>
@@ -150,37 +150,37 @@
             <span data-icon="archive"></span><span>Reunião encerrada: disponível somente para leitura, consulta e exportação.</span>
           </p>
 
-          <!-- Indicadores -->
-          <section class="kpis" aria-label="Participação no cargo atual">
+          <!-- Indicadores: presentes (informado) e votos (contados) são independentes -->
+          <section class="kpis" aria-label="Indicadores do cargo atual">
             <div class="kpi">
               <span class="kpi-icon" data-icon="users"></span>
               <div class="kpi-body">
-                <p class="kpi-label">Participantes previstos</p>
+                <p class="kpi-label">Pessoas presentes</p>
                 <p class="kpi-value" id="s-expected">—</p>
+                <p class="kpi-hint">informado pela mesa</p>
               </div>
             </div>
-            <div class="kpi">
+            <div class="kpi kpi-accent">
               <span class="kpi-icon" data-icon="ballot"></span>
               <div class="kpi-body">
                 <p class="kpi-label">Votos recebidos</p>
                 <p class="kpi-value" id="s-voted">—</p>
-                <p class="kpi-hint">confirmados pelo servidor</p>
+                <p class="kpi-hint">cada confirmação conta um voto</p>
               </div>
             </div>
             <div class="kpi">
-              <span class="kpi-icon" data-icon="clock"></span>
+              <span class="kpi-icon" data-icon="minus"></span>
               <div class="kpi-body">
-                <p class="kpi-label">Não votaram</p>
-                <p class="kpi-value" id="s-missing">—</p>
-                <p class="kpi-hint">credenciais ativas sem voto</p>
+                <p class="kpi-label">Abstenções</p>
+                <p class="kpi-value" id="s-abst">—</p>
               </div>
             </div>
-            <div class="kpi kpi-accent">
-              <span class="kpi-icon" data-icon="chart"></span>
+            <div class="kpi">
+              <span class="kpi-icon" data-icon="check-circle"></span>
               <div class="kpi-body">
-                <p class="kpi-label">Participação</p>
-                <p class="kpi-value" id="s-pct">—</p>
-                <div class="progress" aria-hidden="true"><span id="s-bar"></span></div>
+                <p class="kpi-label">Votos válidos</p>
+                <p class="kpi-value" id="s-valid">—</p>
+                <p class="kpi-hint">sem abstenções</p>
               </div>
             </div>
           </section>
@@ -298,16 +298,16 @@
                     <a id="presentation-open" class="btn btn-secondary" target="_blank" rel="noopener" aria-label="Abrir apresentação em nova aba"><span data-icon="external"></span></a>
                   </div>
                 </div>
-                <p class="hint mt-3">O link público mostra a reunião; só vota quem tem credencial individual.</p>
+                <p class="hint mt-3">Qualquer pessoa com o link ou o QR Code pode votar, sem cadastro.</p>
                 <details class="disclosure" data-mutating>
-                  <summary><span data-icon="sliders"></span>Editar nome e total previsto</summary>
+                  <summary><span data-icon="sliders"></span>Editar nome e pessoas presentes</summary>
                   <form id="edit-meeting-form" class="stack">
                     <div class="field">
                       <label for="e-name">Nome</label>
                       <input id="e-name" type="text" required maxlength="120" />
                     </div>
                     <div class="field">
-                      <label for="e-expected">Total previsto</label>
+                      <label for="e-expected">Pessoas presentes</label>
                       <input id="e-expected" type="number" min="1" max="100000" required />
                     </div>
                     <button class="btn btn-secondary" type="submit">Salvar alterações</button>
@@ -315,75 +315,8 @@
                 </details>
               </section>
 
-              <!-- Detalhes de participação -->
-              <section class="card" aria-labelledby="part-title">
-                <div class="card-header">
-                  <h2 id="part-title"><span data-icon="users"></span>Detalhes</h2>
-                </div>
-                <dl class="detail-list">
-                  <div><dt>Credenciais distribuídas (ativas)</dt><dd id="s-creds">—</dd></div>
-                  <div><dt>Credenciais já usadas</dt><dd id="s-claimed">—</dd></div>
-                  <div><dt>Abstenções</dt><dd id="s-abst">—</dd></div>
-                  <div><dt>Votos válidos</dt><dd id="s-valid">—</dd></div>
-                </dl>
-                <p class="hint mt-3">
-                  Números contam votos confirmados, nunca aparelhos conectados. Abstenção é um voto registrado sem escolha de nome.
-                </p>
-              </section>
             </aside>
           </div>
-
-          <!-- Credenciais -->
-          <section id="credentials" class="card" aria-labelledby="cred-title">
-            <div class="card-header">
-              <div>
-                <h2 id="cred-title"><span data-icon="key"></span>Credenciais individuais</h2>
-                <p class="card-subtitle">
-                  Uma por participante presente; vale um voto por cargo em toda a reunião. Cartão perdido ou troca de aparelho sem cartão:
-                  use <strong>Reemitir</strong> (o antigo deixa de valer e votos já dados contam uma única vez).
-                </p>
-              </div>
-            </div>
-            <form id="cred-form" class="cred-form" data-mutating>
-              <div class="field f-count">
-                <label for="cred-count">Quantidade</label>
-                <input id="cred-count" type="number" min="1" max="500" value="10" required />
-              </div>
-              <div class="field f-prefix">
-                <label for="cred-prefix">Rótulo</label>
-                <input id="cred-prefix" type="text" maxlength="40" value="Credencial" />
-              </div>
-              <button class="btn btn-primary" type="submit"><span data-icon="plus"></span>Emitir credenciais</button>
-            </form>
-
-            <section id="issued" class="issued" hidden aria-labelledby="issued-title">
-              <div class="issued-head">
-                <div>
-                  <h3 id="issued-title"><span data-icon="alert"></span>Credenciais emitidas agora</h3>
-                  <p>Imprima ou distribua antes de sair desta tela: os códigos não ficam guardados no servidor.</p>
-                </div>
-                <div class="row">
-                  <button id="print-cards" class="btn btn-primary" type="button"><span data-icon="printer"></span>Imprimir cartões</button>
-                  <button id="hide-issued" class="btn btn-secondary" type="button">Ocultar</button>
-                </div>
-              </div>
-              <div id="issued-cards" class="cards"></div>
-            </section>
-
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th scope="col">Credencial</th>
-                    <th scope="col">Situação</th>
-                    <th scope="col">Cargo atual</th>
-                    <th scope="col"><span class="sr-only">Ações</span></th>
-                  </tr>
-                </thead>
-                <tbody id="cred-body"></tbody>
-              </table>
-            </div>
-          </section>
 
           <!-- Histórico -->
           <section id="history" class="card" aria-labelledby="hist-title" tabindex="-1">
@@ -401,7 +334,7 @@
                     <th scope="col">Data da votação</th>
                     <th scope="col" class="num">Candidatos</th>
                     <th scope="col" class="num">Total de votos</th>
-                    <th scope="col" class="num">Participação</th>
+                    <th scope="col" class="num">Presentes</th>
                     <th scope="col"><span class="sr-only">Ações</span></th>
                   </tr>
                 </thead>
@@ -447,6 +380,5 @@
       </section>
     </main>
 
-    <div id="print-area" class="cards" hidden></div>
   </body>
 </html>

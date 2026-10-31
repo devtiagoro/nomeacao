@@ -17,14 +17,22 @@ function loadDotEnv(file = path.join(ROOT, '.env')) {
 }
 
 const DEFAULT_RATE_LIMITS = {
-  global: { limit: 600, windowMs: 60_000 },
+  // Proteção genérica contra abuso/inundação. NÃO é controle de votos: numa reunião, muitos
+  // celulares podem sair pelo mesmo IP público (NAT), por isso os limites são altos.
+  global: { limit: 6000, windowMs: 60_000 },
+  wsConnect: { limit: 3000, windowMs: 60_000 },
   login: { limit: 8, windowMs: 15 * 60_000 },
-  vote: { limit: 30, windowMs: 60_000 },
-  credCheck: { limit: 60, windowMs: 60_000 },
-  credFail: { limit: 20, windowMs: 10 * 60_000 },
   admin: { limit: 600, windowMs: 60_000 },
-  wsConnect: { limit: 60, windowMs: 60_000 },
 };
+
+/** Origem (esquema + host) de uma URL, ou '' se inválida. */
+function originOf(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return '';
+  }
+}
 
 function list(v) {
   return String(v || '').split(',').map((s) => s.trim().replace(/\/+$/, '')).filter(Boolean);
@@ -57,6 +65,11 @@ function loadConfig(overrides = {}) {
     rateLimits: { ...DEFAULT_RATE_LIMITS, ...(overrides.rateLimits || {}) },
   };
   cfg.tls = Boolean(cfg.tlsKeyFile && cfg.tlsCertFile);
+  // Endereço do front-end estático (ex.: GitHub Pages). Usado nos links/QR Codes e liberado no CORS.
+  const appUrl = String(overrides.publicAppUrl ?? env.PUBLIC_APP_URL ?? '').trim();
+  cfg.publicAppUrl = appUrl && originOf(appUrl) ? appUrl.replace(/\/*$/, '/') : '';
+  const appOrigin = cfg.publicAppUrl ? originOf(cfg.publicAppUrl) : '';
+  if (appOrigin && !cfg.allowedOrigins.includes(appOrigin)) cfg.allowedOrigins = [...cfg.allowedOrigins, appOrigin];
   return cfg;
 }
 

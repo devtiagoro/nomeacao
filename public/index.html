@@ -3,52 +3,77 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Nomeia — Nomeações e votações</title>
-    <meta name="description" content="Nomeações e votações de cargos em reuniões presenciais" />
+    <title>Nomeia — Sistema de Nomeações e Votações</title>
+    <meta name="description" content="Sistema de nomeações e votações para reuniões presenciais" />
     <meta name="theme-color" content="#0f4c5c" />
     <meta name="color-scheme" content="light dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Nomeia" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/css/style.css" />
-    <script type="module" src="/js/index.js"></script>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <link rel="stylesheet" href="css/style.css" />
+    <script type="module" src="js/index.js"></script>
   </head>
-  <body>
+  <body class="page-home">
     <a class="skip-link" href="#main">Pular para o conteúdo</a>
     <header class="app-header">
       <span class="brand"><span class="brand-mark"><span data-icon="check"></span></span>Nomeia</span>
+      <span id="conn" class="chip connecting" role="status">Verificando servidor…</span>
     </header>
-    <main id="main" class="container narrow entry" tabindex="-1">
-      <div class="entry-hero">
+
+    <main id="main" class="container home" tabindex="-1">
+      <section class="home-hero" aria-labelledby="home-title">
         <span class="eyebrow">Reuniões presenciais</span>
-        <h1>Nomeações e votações, direto do celular</h1>
-        <p class="muted">Acompanhe os cargos em tempo real e vote com a sua credencial individual.</p>
-      </div>
-
-      <section id="continue" class="card" hidden aria-labelledby="continue-title">
-        <h2 id="continue-title" class="small muted">Reunião vinculada a este aparelho</h2>
-        <a id="continue-link" class="btn btn-primary btn-xl btn-block mt-3" href="/votar.html">Abrir reunião<span data-icon="arrow-right"></span></a>
+        <h1 id="home-title">Sistema de Nomeações e Votações</h1>
+        <p class="muted">Apresente os cargos, abra a votação e acompanhe os resultados em tempo real — pelo telão e pelos celulares.</p>
       </section>
 
-      <section class="card" aria-labelledby="code-title">
-        <div class="entry-icon"><span data-icon="key"></span></div>
-        <h2 id="code-title">Tenho um cartão de credencial</h2>
-        <p class="small muted mt-1">Leia o QR Code do cartão com a câmera ou digite o código impresso.</p>
-        <form id="code-form" class="mt-4" novalidate>
-          <div class="field">
-            <label for="code">Código da credencial</label>
-            <input id="code" class="code-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"
-              placeholder="XXXX-XXXX-XXXX" maxlength="20" required />
+      <p id="server-note" class="banner warn" role="status" hidden></p>
+
+      <nav class="home-actions" aria-label="Acessos principais">
+        <a id="go-vote" class="action-card is-primary" href="votar.html">
+          <span class="action-icon" data-icon="ballot"></span>
+          <span class="action-text">
+            <strong>Participar da Votação</strong>
+            <small>Abra no celular e vote assim que a mesa liberar.</small>
+          </span>
+          <span class="action-go" data-icon="arrow-right"></span>
+        </a>
+        <a id="go-presentation" class="action-card" href="apresentacao.html">
+          <span class="action-icon" data-icon="monitor"></span>
+          <span class="action-text">
+            <strong>Tela de Apresentação</strong>
+            <small>Para o telão: cargo, nomes, QR Code e resultados.</small>
+          </span>
+          <span class="action-go" data-icon="arrow-right"></span>
+        </a>
+        <a id="go-admin" class="action-card" href="admin.html">
+          <span class="action-icon" data-icon="shield"></span>
+          <span class="action-text">
+            <strong>Painel Administrativo</strong>
+            <small>Acesso da mesa, protegido por segredo.</small>
+          </span>
+          <span class="action-go" data-icon="arrow-right"></span>
+        </a>
+      </nav>
+
+      <section id="picker" class="card" aria-labelledby="picker-title" tabindex="-1">
+        <div class="card-header">
+          <div>
+            <h2 id="picker-title"><span data-icon="calendar"></span>Reunião</h2>
+            <p class="card-subtitle">Escolha a reunião para a votação e para a tela de apresentação.</p>
           </div>
-          <p id="code-error" class="banner error mt-3" role="alert" hidden></p>
-          <button class="btn btn-primary btn-lg btn-block mt-4" type="submit">Entrar</button>
-        </form>
+        </div>
+        <div id="meeting-list" class="meeting-list" role="radiogroup" aria-labelledby="picker-title" aria-busy="true">
+          <span class="skeleton sk-block"></span>
+          <span class="skeleton sk-block"></span>
+        </div>
+        <p id="picker-hint" class="hint mt-3" aria-live="polite"></p>
       </section>
 
-      <p class="footer-note"><a href="/admin.html">Área da administração</a></p>
+      <p class="footer-note">Nomeia · votação pública por link ou QR Code</p>
     </main>
   </body>
 </html>

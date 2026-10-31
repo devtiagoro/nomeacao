@@ -2,11 +2,6 @@
 
 const crypto = require('node:crypto');
 
-// Alfabeto sem caracteres ambíguos (sem 0/O, 1/I/L): 31 símbolos.
-const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
-const CODE_LENGTH = 12; // ~59 bits; força bruta inviável com rate limiting.
-const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
-
 function sha256(text) {
   return crypto.createHash('sha256').update(text).digest('hex');
 }
@@ -26,44 +21,7 @@ function newId(prefix) {
   return `${prefix}_${crypto.randomBytes(9).toString('base64url')}`;
 }
 
-function newToken() {
-  return crypto.randomBytes(32).toString('base64url');
-}
-
-function newCode() {
-  let out = '';
-  for (let i = 0; i < CODE_LENGTH; i++) out += CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)];
-  return out;
-}
-
-function formatCode(code) {
-  return code.match(/.{1,4}/g).join('-');
-}
-
-/**
- * Normaliza uma credencial (token de link/QR ou código digitado) e devolve o hash
- * pelo qual ela é indexada. Retorna null se o formato for inválido.
- */
-function credentialHash(raw) {
-  if (typeof raw !== 'string') return null;
-  const trimmed = raw.trim();
-  if (TOKEN_RE.test(trimmed)) return sha256('tok:' + trimmed);
-  const code = trimmed.toUpperCase().replace(/[\s-]/g, '');
-  if (code.length === CODE_LENGTH && [...code].every((c) => CODE_ALPHABET.includes(c))) {
-    return sha256('code:' + code);
-  }
-  return null;
-}
-
-function tokenHash(token) {
-  return sha256('tok:' + token);
-}
-
-function codeHash(code) {
-  return sha256('code:' + code);
-}
-
-/** Rate limiter em memória com janela fixa por chave. */
+/** Rate limiter em memória com janela fixa por chave (proteção contra abuso, não controle de votos). */
 class RateLimiter {
   constructor(limits) {
     this.limits = limits;
@@ -85,13 +43,6 @@ class RateLimiter {
     }
     entry.count++;
     return entry.count <= rule.limit;
-  }
-
-  /** Verifica sem contabilizar. */
-  blocked(bucket, key) {
-    const rule = this.limits[bucket];
-    const entry = this.buckets.get(`${bucket}:${key}`);
-    return Boolean(rule && entry && entry.reset > Date.now() && entry.count >= rule.limit);
   }
 
   sweep() {
@@ -157,19 +108,4 @@ function parseCookies(header) {
   return out;
 }
 
-module.exports = {
-  sha256,
-  safeEqualHex,
-  safeEqualText,
-  newId,
-  newToken,
-  newCode,
-  formatCode,
-  credentialHash,
-  tokenHash,
-  codeHash,
-  RateLimiter,
-  SessionStore,
-  parseCookies,
-  CODE_LENGTH,
-};
+module.exports = { sha256, safeEqualHex, safeEqualText, newId, RateLimiter, SessionStore, parseCookies };

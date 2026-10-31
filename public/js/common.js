@@ -1,5 +1,26 @@
 // NOMEIA — utilidades compartilhadas (ES module, sem dependências).
 // Todo texto vindo do servidor é inserido via textContent (nunca innerHTML) para evitar XSS.
+// Todos os caminhos são relativos: funciona na raiz do servidor Node e em subpastas (GitHub Pages).
+
+import { API_BASE } from './config.js';
+
+const SERVER = String(API_BASE || '').replace(/\/+$/, '');
+
+/** URL absoluta de um recurso do servidor Node (API, QR, WebSocket). */
+export function apiUrl(path) {
+  return `${SERVER}${path}`;
+}
+
+/** true quando as páginas estão em hospedagem estática separada do servidor Node. */
+export const isRemoteServer = Boolean(SERVER) && SERVER !== location.origin;
+
+/** Hospedagem estática (ex.: GitHub Pages) sem servidor configurado em js/config.js. */
+export const serverMissing = !SERVER && /\.github\.io$/i.test(location.hostname);
+
+/** Endereço do painel administrativo: sempre servido pelo próprio servidor Node (sessão segura). */
+export function adminUrl(params = '') {
+  return isRemoteServer ? `${SERVER}/admin.html${params}` : `admin.html${params}`;
+}
 
 export class ApiError extends Error {
   constructor(status, code, message) {
@@ -10,16 +31,18 @@ export class ApiError extends Error {
 }
 
 /** Chamada HTTP JSON. O servidor é sempre a autoridade; nada é enfileirado offline. */
-export async function api(path, { method = 'GET', body, credential, signal } = {}) {
+export async function api(path, { method = 'GET', body, signal } = {}) {
+  if (serverMissing) {
+    throw new ApiError(0, 'server_not_configured', 'Servidor do NOMEIA não configurado nesta publicação (js/config.js).');
+  }
   const headers = { Accept: 'application/json' };
   if (method !== 'GET') {
     headers['X-Nomeia'] = '1';
     if (body !== undefined) headers['Content-Type'] = 'application/json';
   }
-  if (credential) headers.Authorization = `Bearer ${credential}`;
   let res;
   try {
-    res = await fetch(path, {
+    res = await fetch(apiUrl(path), {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -105,9 +128,9 @@ export function plural(n, one, many) {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-// ---------------- Credencial no dispositivo ----------------
-
-const credKey = (meetingId) => `nomeia:cred:${meetingId}`;
+// ---------------- Preferência local ----------------
+// Guarda apenas qual reunião foi aberta por último (atalho de navegação).
+// Nunca é usado para limitar votos.
 
 function safeStorage(kind) {
   try {
@@ -122,26 +145,6 @@ function safeStorage(kind) {
 }
 
 export const storage = {
-  getCredential(meetingId) {
-    return safeStorage('sessionStorage')?.getItem(credKey(meetingId)) || safeStorage('localStorage')?.getItem(credKey(meetingId)) || null;
-  },
-  isPersisted(meetingId) {
-    return Boolean(safeStorage('localStorage')?.getItem(credKey(meetingId)));
-  },
-  /** persist=true só com consentimento do participante. */
-  saveCredential(meetingId, credential, persist) {
-    if (persist) {
-      safeStorage('localStorage')?.setItem(credKey(meetingId), credential);
-      safeStorage('sessionStorage')?.removeItem(credKey(meetingId));
-      safeStorage('localStorage')?.setItem('nomeia:lastMeeting', meetingId);
-    } else {
-      safeStorage('sessionStorage')?.setItem(credKey(meetingId), credential);
-    }
-  },
-  forgetCredential(meetingId) {
-    safeStorage('localStorage')?.removeItem(credKey(meetingId));
-    safeStorage('sessionStorage')?.removeItem(credKey(meetingId));
-  },
   lastMeeting() {
     return safeStorage('localStorage')?.getItem('nomeia:lastMeeting') || null;
   },
@@ -169,10 +172,11 @@ export function connectLive({ meetingId, role = 'public', onState, onStatus = ()
   let reconnectTimer = null;
   let stopped = false;
 
-  const url = () =>
-    `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws?meeting=${encodeURIComponent(meetingId)}${
-      role === 'admin' ? '&role=admin' : ''
-    }`;
+  const url = () => {
+    const base = SERVER ? new URL(SERVER) : location;
+    const proto = base.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${base.host}/ws?meeting=${encodeURIComponent(meetingId)}${role === 'admin' ? '&role=admin' : ''}`;
+  };
 
   function stopPing() {
     clearInterval(pingTimer);
@@ -263,6 +267,11 @@ export function connectLive({ meetingId, role = 'public', onState, onStatus = ()
     if (e.persisted) resync();
   });
 
+  if (serverMissing) {
+    onStatus('offline');
+    onFatal('server_not_configured');
+    return { resync() {}, close() {} };
+  }
   connect();
   return {
     resync,
@@ -296,7 +305,7 @@ export function setupOfflineBar() {
 
 export function registerServiceWorker() {
   if ('serviceWorker' in navigator && window.isSecureContext) {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+    navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
   }
 }
 
@@ -526,8 +535,7 @@ export function renderResults(results, { showAbstain = true, animate = false, co
         stat('Votos registrados', results.castVotes),
         stat('Válidos', results.validVotes),
         stat('Abstenções', results.abstentions),
-        stat('Não votaram', results.notVotedCredentials),
-        stat('Participação', fmtPct(results.turnoutPctExpected)),
+        stat('Pessoas presentes', results.presentParticipants ?? results.expectedParticipants ?? '—'),
       );
 
   const root = el('div', { class: 'result' }, list, notes.length ? el('div', { class: 'result-notes' }, ...notes) : null, summary);

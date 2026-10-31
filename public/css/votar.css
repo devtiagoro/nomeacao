@@ -353,52 +353,6 @@
   display: none;
 }
 
-/* Credencial */
-.code-card h2 {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-lg);
-}
-
-.code-card h2 .icon {
-  color: var(--primary);
-}
-
-.identity {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-}
-
-.identity-who {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.identity strong {
-  color: var(--text);
-}
-
-/* Consentimento */
-.consent {
-  padding: var(--space-6);
-}
-
-.consent-actions {
-  display: grid;
-  gap: var(--space-2);
-  margin-top: var(--space-6);
-}
-
 /* Modal de confirmação do voto */
 .confirm-choice {
   margin: var(--space-3) 0;

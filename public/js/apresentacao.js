@@ -11,12 +11,14 @@ import {
   STATUS_LABEL,
   registerServiceWorker,
   icon,
-  fmtPct,
+  apiUrl,
+  serverMissing,
+  storage,
 } from './common.js';
 
 registerServiceWorker();
 
-const meetingId = new URLSearchParams(location.search).get('m');
+const meetingId = new URLSearchParams(location.search).get('m') || storage.lastMeeting();
 let lastCandidatesKey = '';
 let lastResultsKey = '';
 let resultsShownFor = null;
@@ -30,7 +32,7 @@ function fail(text) {
 
 const STATUS_LINE = {
   discussing: ['users', 'Em discussão — a votação ainda não foi aberta.'],
-  voting_open: ['ballot', 'Votação aberta — vote pelo celular com sua credencial.'],
+  voting_open: ['ballot', 'Votação aberta — leia o QR Code e vote pelo celular.'],
   closed: ['lock', 'Votação encerrada.'],
 };
 
@@ -108,15 +110,9 @@ function render(s, type) {
     $('#results').replaceChildren(node);
   }
 
-  // Participação
-  const voted = o ? o.turnout.voted : 0;
-  const expected = s.expectedParticipants;
-  const pct = Math.min(100, (voted * 100) / Math.max(1, expected));
-  setText('#t-voted', voted);
-  setText('#t-pending', Math.max(0, expected - voted));
-  setText('#t-expected', expected);
-  setText('#t-pct', fmtPct(Math.round(pct * 10) / 10));
-  $('#t-bar').style.width = `${pct}%`;
+  // Contadores independentes: votos enviados × pessoas presentes (informado pela mesa).
+  setText('#t-voted', o ? o.turnout.votes : 0);
+  setText('#t-expected', s.expectedParticipants);
   $('#turnout-card').hidden = !o || o.status === 'discussing';
 
   const msgs = {
@@ -129,17 +125,20 @@ function render(s, type) {
 }
 
 if (!isMeetingId(meetingId)) {
-  fail('Link de apresentação inválido.');
+  // Sem reunião escolhida: a página inicial lista as reuniões disponíveis.
+  location.replace('index.html');
 } else {
-  $('#qr').src = `/api/meetings/${meetingId}/qr.svg`;
+  storage.rememberMeeting(meetingId);
+  if (!serverMissing) $('#qr').src = apiUrl(`/api/meetings/${meetingId}/qr.svg`);
   api(`/api/meetings/${meetingId}/link`)
     .then((r) => setText('#public-link', r.publicUrl))
-    .catch(() => setText('#public-link', `${location.origin}/votar.html?m=${meetingId}`));
+    .catch(() => setText('#public-link', new URL(`votar.html?m=${meetingId}`, location.href).href));
   connectLive({
     meetingId,
     onState: render,
     onStatus: (st) => statusChip($('#conn'), st),
-    onFatal: () => fail('Reunião não encontrada.'),
+    onFatal: (reason) =>
+      fail(reason === 'server_not_configured' ? 'Esta publicação ainda não está ligada a um servidor do NOMEIA (js/config.js).' : 'Reunião não encontrada.'),
   });
 }
 

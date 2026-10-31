@@ -11,18 +11,18 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Nomeia" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/css/style.css" />
-    <link rel="stylesheet" href="/css/votar.css" />
-    <script type="module" src="/js/votar.js"></script>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/votar.css" />
+    <script type="module" src="js/votar.js"></script>
   </head>
   <body class="page-vote">
     <a class="skip-link" href="#main">Pular para o conteúdo</a>
     <header class="app-header vote-header">
       <div class="vote-header-main">
-        <a class="brand-mark" href="/index.html" aria-label="Nomeia — início"><span data-icon="check"></span></a>
+        <a class="brand-mark" href="index.html" aria-label="Nomeia — início"><span data-icon="check"></span></a>
         <div class="vote-header-text">
           <span class="eyebrow">Nomeia · Reunião</span>
           <h1 id="meeting-name" class="vote-meeting">Carregando…</h1>
@@ -46,52 +46,14 @@
           <div class="empty-icon"><span data-icon="alert"></span></div>
           <p class="empty-title">Não foi possível abrir a reunião</p>
           <p id="error-text" class="empty-text" role="alert"></p>
-          <a class="btn btn-secondary" href="/index.html"><span data-icon="arrow-left"></span>Voltar ao início</a>
+          <a class="btn btn-secondary" href="index.html"><span data-icon="arrow-left"></span>Voltar ao início</a>
         </div>
-      </section>
-
-      <section id="view-consent" class="card consent" hidden aria-labelledby="consent-title">
-        <div class="entry-icon"><span data-icon="key"></span></div>
-        <h2 id="consent-title">Credencial reconhecida</h2>
-        <p class="muted mt-2">
-          <strong id="consent-label"></strong> · <span id="consent-meeting"></span>
-        </p>
-        <p class="mt-4">
-          Para votar nos próximos cargos sem ler o QR Code de novo, podemos guardar esta credencial
-          <strong>somente neste aparelho</strong>. Ela não é enviada a terceiros e pode ser apagada a qualquer momento.
-        </p>
-        <div class="consent-actions">
-          <button id="consent-yes" class="btn btn-primary btn-xl btn-block" type="button">Salvar neste aparelho</button>
-          <button id="consent-no" class="btn btn-secondary btn-lg btn-block" type="button">Usar só nesta sessão</button>
-        </div>
-        <p class="hint center mt-3">Não compartilhe sua credencial: ela vale um voto por cargo.</p>
       </section>
 
       <section id="view-main" hidden>
         <div id="flash" role="alert"></div>
         <div id="office-area" class="office-area"></div>
         <p id="turnout" class="turnout-line" aria-live="off"></p>
-
-        <section id="code-area" class="card code-card" hidden aria-labelledby="code-title">
-          <h2 id="code-title"><span data-icon="key"></span>Tenho uma credencial</h2>
-          <p class="small muted mt-2 mb-4">
-            Leia o QR Code do seu cartão individual ou digite o código impresso nele. O link público sozinho não permite votar.
-          </p>
-          <form id="code-form" novalidate>
-            <div class="field">
-              <label for="code-input">Código da credencial</label>
-              <input id="code-input" class="code-input" type="text" inputmode="text" autocomplete="off" autocapitalize="characters"
-                spellcheck="false" placeholder="XXXX-XXXX-XXXX" maxlength="20" aria-describedby="code-help" />
-              <p id="code-help" class="hint">12 letras ou números, com ou sem hífens.</p>
-            </div>
-            <button class="btn btn-primary btn-lg btn-block mt-4" type="submit">Usar código</button>
-          </form>
-        </section>
-
-        <footer id="identity" class="identity" hidden>
-          <span class="identity-who"><span data-icon="key"></span>Identificado como <strong id="identity-label"></strong></span>
-          <button id="forget" class="btn btn-ghost btn-sm" type="button">Esquecer neste aparelho</button>
-        </footer>
       </section>
     </main>
 
@@ -100,7 +62,7 @@
       <h2 id="confirm-title" class="modal-title">Confirmar voto</h2>
       <p id="confirm-desc" class="modal-text">Você escolheu:</p>
       <p id="confirm-choice" class="confirm-choice"></p>
-      <p class="modal-text">Depois de confirmado, o voto não pode ser alterado nem repetido.</p>
+      <p class="modal-text">Ao confirmar, o voto é registrado e entra imediatamente na contagem.</p>
       <div class="modal-actions">
         <button id="confirm-cancel" class="btn btn-secondary" type="button">Voltar</button>
         <button id="confirm-btn" class="btn btn-primary" type="button">Confirmar voto</button>

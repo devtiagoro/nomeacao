@@ -2,7 +2,8 @@
 
 const { sha256, newId } = require('./security');
 
-const SCHEMA_VERSION = 1;
+// v2: votação pública (sem credenciais). v1 (com credenciais) é migrado automaticamente.
+const SCHEMA_VERSION = 2;
 const MEETING_STATUS = ['active', 'archived'];
 const OFFICE_STATUS = ['draft', 'discussing', 'voting_open', 'closed'];
 const RESULTS_MODES = ['on_publish', 'on_close', 'live'];
@@ -11,15 +12,16 @@ const ABSTAIN = 'abstain';
 const LIMITS = {
   nameMax: 120,
   descriptionMax: 500,
-  labelPrefixMax: 40,
   expectedMax: 100_000,
   candidatesPerOffice: 100,
   officesPerMeeting: 200,
-  credentialsPerMeeting: 5000,
-  credentialsPerRequest: 500,
+  votesPerOffice: 100_000,
 };
 
 const ID_RE = /^[mopc]_[A-Za-z0-9_-]{12}$/;
+// Identificador aleatório de uma confirmação de voto (gerado no navegador). Serve apenas para
+// descartar retransmissões da MESMA operação (duplo clique, reenvio após falha de rede).
+const REQUEST_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
 
 class HttpError extends Error {
   constructor(status, code, message) {
@@ -70,14 +72,13 @@ function newMeeting({ name, expectedParticipants }) {
     id: newId('m'),
     name: cleanText(name, 'name'),
     status: 'active',
+    // Pessoas presentes informadas pelo administrador. NÃO é o número de votos.
     expectedParticipants: cleanInt(expectedParticipants, 'expectedParticipants', 1, LIMITS.expectedMax),
     createdAt: t,
     updatedAt: t,
     archivedAt: null,
     version: 1,
     currentOfficeId: null,
-    participantSeq: 0,
-    participants: [],
     offices: [],
   };
 }
@@ -98,7 +99,7 @@ function newOffice({ title, description, resultsMode }) {
     closedAt: null,
     publishedAt: null,
     candidates: [],
-    voterIds: [],
+    requestIds: [],
     tally: { abstain: 0, byCandidate: {} },
     result: null,
     resultHash: null,
@@ -140,15 +141,23 @@ function phase(m) {
   return cur ? cur.status : 'draft';
 }
 
+/** Total de votos registrados no cargo (candidatos + abstenções). */
+function totalVotes(o) {
+  let n = o.tally.abstain;
+  for (const v of Object.values(o.tally.byCandidate)) n += v;
+  return n;
+}
+
 const pct = (n, d) => (d > 0 ? Math.round((n * 10000) / d) / 100 : 0);
 
 /**
  * Apuração agregada de um cargo. Todos os candidatos aparecem, inclusive com zero votos.
  * Percentuais: sobre votos válidos (sem abstenções) e sobre votos registrados.
+ * Votos e pessoas presentes são números independentes: um voto não representa uma pessoa.
  * Nunca declara aprovação automática: apenas indica o(s) mais votado(s) e empate.
  */
 function computeResult(m, o) {
-  const castVotes = o.voterIds.length;
+  const castVotes = totalVotes(o);
   const abstentions = o.tally.abstain;
   const validVotes = castVotes - abstentions;
   const candidates = o.candidates.map((c) => {
@@ -157,19 +166,13 @@ function computeResult(m, o) {
   });
   const maxVotes = candidates.reduce((a, c) => Math.max(a, c.votes), 0);
   const leaders = maxVotes > 0 ? candidates.filter((c) => c.votes === maxVotes).map((c) => c.id) : [];
-  const active = m.participants.filter((p) => !p.revoked);
-  const voters = new Set(o.voterIds);
   return {
     candidates,
     castVotes,
     validVotes,
     abstentions,
     abstentionPctCast: pct(abstentions, castVotes),
-    expectedParticipants: m.expectedParticipants,
-    credentialsActive: active.length,
-    notVotedCredentials: active.filter((p) => !voters.has(p.id)).length,
-    missingVsExpected: Math.max(0, m.expectedParticipants - castVotes),
-    turnoutPctExpected: pct(castVotes, m.expectedParticipants),
+    presentParticipants: m.expectedParticipants,
     maxVotes,
     leaders,
     tie: leaders.length > 1,
@@ -206,13 +209,9 @@ function resultsVisible(o) {
   return (o.status === 'closed' && o.resultsPublished) || (o.status === 'voting_open' && o.resultsMode === 'live');
 }
 
+/** Contadores públicos: pessoas presentes (informado) e votos enviados (contados). */
 function turnout(m, o) {
-  const active = m.participants.filter((p) => !p.revoked).length;
-  return {
-    expected: m.expectedParticipants,
-    credentialsActive: active,
-    voted: o ? o.voterIds.length : 0,
-  };
+  return { present: m.expectedParticipants, votes: o ? totalVotes(o) : 0 };
 }
 
 function publicOffice(m, o) {
@@ -233,7 +232,7 @@ function publicOffice(m, o) {
   };
 }
 
-/** Estado público: nunca contém credenciais, quem votou ou apuração não liberada. */
+/** Estado público: sem apuração não liberada. */
 function publicSnapshot(m) {
   const cur = m.offices.find((o) => o.id === m.currentOfficeId && o.status !== 'draft');
   return {
@@ -259,11 +258,8 @@ function publicSnapshot(m) {
   };
 }
 
-/** Estado administrativo: sem hashes de credenciais. Escolhas nunca são ligadas a participantes. */
+/** Estado administrativo: apuração parcial e resultados finais de todos os cargos. */
 function adminSnapshot(m) {
-  const votedBy = new Map(m.participants.map((p) => [p.id, []]));
-  for (const o of m.offices) for (const pid of o.voterIds) votedBy.get(pid)?.push(o.id);
-  const cur = m.offices.find((o) => o.id === m.currentOfficeId) || null;
   return {
     id: m.id,
     name: m.name,
@@ -276,16 +272,6 @@ function adminSnapshot(m) {
     version: m.version,
     schemaVersion: m.schemaVersion,
     currentOfficeId: m.currentOfficeId,
-    participants: m.participants.map((p) => ({
-      id: p.id,
-      label: p.label,
-      createdAt: p.createdAt,
-      firstSeenAt: p.firstSeenAt,
-      reissuedAt: p.reissuedAt,
-      revoked: p.revoked,
-      revokedAt: p.revokedAt,
-      votedOfficeIds: votedBy.get(p.id) || [],
-    })),
     offices: m.offices.map((o) => ({
       id: o.id,
       title: o.title,
@@ -305,13 +291,27 @@ function adminSnapshot(m) {
       result: o.result,
       resultHash: o.resultHash,
     })),
-    currentTurnout: cur
-      ? {
-          ...turnout(m, cur),
-          credentialsClaimed: m.participants.filter((p) => !p.revoked && p.firstSeenAt).length,
-        }
-      : null,
   };
+}
+
+// ---------- Migração de esquema ----------
+
+/**
+ * v1 → v2: remove credenciais (participantes, hashes, lista de quem votou).
+ * Contagens e resultados encerrados são preservados intactos (o hash continua válido).
+ */
+function migrateMeeting(doc) {
+  if (!doc || typeof doc !== 'object') return doc;
+  if (doc.schemaVersion !== 1) return doc;
+  const m = structuredClone(doc);
+  delete m.participants;
+  delete m.participantSeq;
+  for (const o of Array.isArray(m.offices) ? m.offices : []) {
+    delete o.voterIds;
+    o.requestIds = [];
+  }
+  m.schemaVersion = 2;
+  return m;
 }
 
 // ---------- Validação estrutural (antes de gravar e na importação) ----------
@@ -334,22 +334,9 @@ function validateMeeting(m, { checkHashes = false } = {}) {
   if (!Number.isInteger(m.expectedParticipants) || m.expectedParticipants < 1) fail('expectedParticipants');
   if (!isIso(m.createdAt) || !isIso(m.updatedAt) || !isIsoOrNull(m.archivedAt)) fail('datas da reunião');
   if (!Number.isInteger(m.version) || m.version < 1) fail('version');
-  if (!Number.isInteger(m.participantSeq) || m.participantSeq < 0) fail('participantSeq');
-  if (!Array.isArray(m.participants) || !Array.isArray(m.offices)) fail('listas');
-  if (m.participants.length > LIMITS.credentialsPerMeeting) fail('excesso de credenciais');
+  if ('participants' in m) fail('campo de credenciais não suportado');
+  if (!Array.isArray(m.offices)) fail('listas');
   if (m.offices.length > LIMITS.officesPerMeeting) fail('excesso de cargos');
-
-  const pids = new Set();
-  for (const p of m.participants) {
-    if (!p || !ID_RE.test(p.id) || !p.id.startsWith('p_') || pids.has(p.id)) fail('participante');
-    pids.add(p.id);
-    if (!isStr(p.label, LIMITS.nameMax)) fail('rótulo de participante');
-    if (!isHash(p.tokenHash) || !isHash(p.codeHash)) fail('hash de credencial');
-    if (typeof p.revoked !== 'boolean') fail('revoked');
-    if (!isIso(p.createdAt) || !isIsoOrNull(p.firstSeenAt) || !isIsoOrNull(p.reissuedAt) || !isIsoOrNull(p.revokedAt)) {
-      fail('datas de participante');
-    }
-  }
 
   const oids = new Set();
   let active = 0;
@@ -371,23 +358,21 @@ function validateMeeting(m, { checkHashes = false } = {}) {
       if (!isStr(c.name, LIMITS.nameMax) || !c.name) fail('nome de candidato');
       cids.add(c.id);
     }
-    if (!Array.isArray(o.voterIds) || new Set(o.voterIds).size !== o.voterIds.length) fail('voterIds');
-    for (const pid of o.voterIds) if (!pids.has(pid)) fail('voterIds referencia participante inexistente');
     if (!o.tally || !Number.isInteger(o.tally.abstain) || o.tally.abstain < 0) fail('tally');
     if (!o.tally.byCandidate || typeof o.tally.byCandidate !== 'object') fail('tally');
-    let sum = o.tally.abstain;
     for (const [cid, n] of Object.entries(o.tally.byCandidate)) {
       if (!cids.has(cid) || !Number.isInteger(n) || n < 0) fail('tally por candidato');
-      sum += n;
     }
-    if (sum !== o.voterIds.length) fail('soma da apuração difere do número de votantes');
-    if (o.status === 'draft' || o.status === 'discussing') {
-      if (o.voterIds.length) fail('votos em cargo não aberto');
-    }
+    const total = totalVotes(o);
+    if (total > LIMITS.votesPerOffice) fail('excesso de votos');
+    if (!Array.isArray(o.requestIds) || o.requestIds.length > total) fail('requestIds');
+    if (new Set(o.requestIds).size !== o.requestIds.length) fail('requestIds duplicados');
+    for (const r of o.requestIds) if (typeof r !== 'string' || !REQUEST_ID_RE.test(r)) fail('requestId');
+    if ((o.status === 'draft' || o.status === 'discussing') && total) fail('votos em cargo não aberto');
     if (o.status === 'closed') {
       if (!o.result || !isHash(o.resultHash) || !isIso(o.closedAt)) fail('resultado de cargo encerrado');
       if (checkHashes && resultHash(m.id, o) !== o.resultHash) fail(`hash do resultado do cargo ${o.id} não confere`);
-      if (o.result.castVotes !== o.voterIds.length) fail('resultado difere dos votos registrados');
+      if (o.result.castVotes !== total) fail('resultado difere dos votos registrados');
     } else if (o.result !== null || o.resultHash !== null) {
       fail('resultado em cargo não encerrado');
     }
@@ -403,6 +388,7 @@ module.exports = {
   ABSTAIN,
   LIMITS,
   ID_RE,
+  REQUEST_ID_RE,
   HttpError,
   now,
   cleanText,
@@ -416,10 +402,12 @@ module.exports = {
   assertEditable,
   activeOffice,
   phase,
+  totalVotes,
   computeResult,
   resultHash,
   canonical,
   publicSnapshot,
   adminSnapshot,
+  migrateMeeting,
   validateMeeting,
 };

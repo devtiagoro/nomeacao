@@ -3,10 +3,16 @@
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { validateMeeting, HttpError, SCHEMA_VERSION, ID_RE, now } = require('./domain');
+const { validateMeeting, migrateMeeting, HttpError, SCHEMA_VERSION, ID_RE, now } = require('./domain');
 const { sha256 } = require('./security');
 
 const EXPORT_FORMAT = 'nomeia-export';
+const SKIP = Symbol('skip');
+
+/** Valor de retorno para mutate() que não altera o estado (nada é gravado). */
+function skip(value) {
+  return { [SKIP]: true, value };
+}
 
 function deepFreeze(o) {
   if (o && typeof o === 'object' && !Object.isFrozen(o)) {
@@ -83,7 +89,6 @@ class Store {
     this.log = log;
     this.meetings = new Map();
     this.queues = new Map();
-    this.credIndex = new Map(); // hash -> { meetingId, participantId }
     this.globalQueue = Promise.resolve();
   }
 
@@ -108,8 +113,15 @@ class Store {
   async _load(id) {
     const file = path.join(this.meetingsDir, `${id}.json`);
     try {
-      const m = validateMeeting(JSON.parse(await fsp.readFile(file, 'utf8')));
+      const raw = JSON.parse(await fsp.readFile(file, 'utf8'));
+      const m = validateMeeting(migrateMeeting(raw));
       if (m.id !== id) throw new Error('id divergente');
+      if (raw.schemaVersion !== m.schemaVersion) {
+        // Guarda o original antes de regravar no formato novo (sem credenciais).
+        await this._writeBackup(id, raw, `pre-migracao-v${raw.schemaVersion}`);
+        await writeFileAtomic(file, JSON.stringify(m, null, 2));
+        this.log.warn(`Reunião ${id} migrada do esquema v${raw.schemaVersion} para v${m.schemaVersion} (votação pública).`);
+      }
       this._commit(m);
       return;
     } catch (err) {
@@ -119,7 +131,7 @@ class Store {
     for (const b of backups.reverse()) {
       try {
         const doc = JSON.parse(await fsp.readFile(b, 'utf8'));
-        const m = validateMeeting(doc.meeting);
+        const m = validateMeeting(migrateMeeting(doc.meeting));
         if (m.id !== id) continue;
         await writeFileAtomic(file, JSON.stringify(m, null, 2));
         this._commit(m);
@@ -133,11 +145,6 @@ class Store {
   }
 
   _commit(m) {
-    for (const [h, ref] of this.credIndex) if (ref.meetingId === m.id) this.credIndex.delete(h);
-    for (const p of m.participants) {
-      this.credIndex.set(p.tokenHash, { meetingId: m.id, participantId: p.id });
-      this.credIndex.set(p.codeHash, { meetingId: m.id, participantId: p.id });
-    }
     this.meetings.set(m.id, deepFreeze(m));
   }
 
@@ -153,10 +160,6 @@ class Store {
 
   list() {
     return [...this.meetings.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }
-
-  lookupCredential(hash) {
-    return hash ? this.credIndex.get(hash) || null : null;
   }
 
   _enqueue(id, task) {
@@ -187,6 +190,7 @@ class Store {
 
   /**
    * Aplica fn(draft) atomicamente. Se fn lançar erro, nada é gravado.
+   * Se fn retornar skip(valor), o estado não muda e nada é gravado.
    * Retorna { meeting, result } somente após a gravação durável.
    */
   mutate(id, fn) {
@@ -194,6 +198,7 @@ class Store {
       const cur = this.require(id);
       const draft = structuredClone(cur);
       const result = await fn(draft);
+      if (result && result[SKIP]) return { meeting: cur, result: result.value, skipped: true };
       draft.version = cur.version + 1;
       draft.updatedAt = now();
       await this._persist(draft);
@@ -271,21 +276,30 @@ class Store {
     }
   }
 
+  /** Escreve o arquivo de backup (no formato de exportação) e aplica a retenção. */
+  async _writeBackup(id, meeting, reason) {
+    const dir = path.join(this.backupsDir, id);
+    await fsp.mkdir(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const safeReason = String(reason || 'manual').replace(/[^a-z0-9_-]/gi, '').slice(0, 30);
+    this.backupSeq = ((this.backupSeq || 0) + 1) % 1000;
+    const name = `${stamp}-${String(this.backupSeq).padStart(3, '0')}-v${String(meeting.version).padStart(6, '0')}-${safeReason}.json`;
+    const doc = {
+      format: EXPORT_FORMAT,
+      schemaVersion: meeting.schemaVersion,
+      exportedAt: now(),
+      meeting,
+      ledger: await this.readLedger(id),
+    };
+    await writeFileAtomic(path.join(dir, name), JSON.stringify(doc));
+    const all = await this._listBackups(id);
+    for (const old of all.slice(0, Math.max(0, all.length - this.backupKeep))) await fsp.rm(old, { force: true });
+    return name;
+  }
+
   /** Grava um backup versionado. Mantém os mais recentes; nunca remove o mais novo. */
   backup(id, reason) {
-    return this.withLock(id, async (m) => {
-      const dir = path.join(this.backupsDir, id);
-      await fsp.mkdir(dir, { recursive: true });
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const safeReason = String(reason || 'manual').replace(/[^a-z0-9_-]/gi, '').slice(0, 30);
-      this.backupSeq = ((this.backupSeq || 0) + 1) % 1000;
-      const name = `${stamp}-${String(this.backupSeq).padStart(3, '0')}-v${String(m.version).padStart(6, '0')}-${safeReason}.json`;
-      const doc = { format: EXPORT_FORMAT, schemaVersion: SCHEMA_VERSION, exportedAt: now(), meeting: m, ledger: await this.readLedger(id) };
-      await writeFileAtomic(path.join(dir, name), JSON.stringify(doc));
-      const all = await this._listBackups(id);
-      for (const old of all.slice(0, Math.max(0, all.length - this.backupKeep))) await fsp.rm(old, { force: true });
-      return name;
-    });
+    return this.withLock(id, (m) => this._writeBackup(id, m, reason));
   }
 
   async listBackups(id) {
@@ -298,16 +312,11 @@ class Store {
    */
   importDoc(doc) {
     if (!doc || doc.format !== EXPORT_FORMAT) throw new HttpError(400, 'invalid_data', 'Arquivo não é uma exportação NOMEIA.');
-    if (doc.schemaVersion !== SCHEMA_VERSION) throw new HttpError(400, 'invalid_data', 'Versão de esquema não suportada.');
-    const m = validateMeeting(structuredClone(doc.meeting), { checkHashes: true });
+    if (![1, SCHEMA_VERSION].includes(doc.schemaVersion)) throw new HttpError(400, 'invalid_data', 'Versão de esquema não suportada.');
+    // Exportações v1 (com credenciais) são convertidas: contagens e resultados selados são preservados.
+    const m = validateMeeting(migrateMeeting(structuredClone(doc.meeting)), { checkHashes: true });
     const ledger = Array.isArray(doc.ledger) ? doc.ledger : [];
     if (!Store.verifyLedger(ledger)) throw new HttpError(400, 'invalid_data', 'Ledger inválido ou adulterado.');
-    for (const p of m.participants) {
-      for (const h of [p.tokenHash, p.codeHash]) {
-        const ref = this.credIndex.get(h);
-        if (ref && ref.meetingId !== m.id) throw new HttpError(409, 'conflict', 'Credenciais conflitam com outra reunião.');
-      }
-    }
     return this._enqueue(m.id, async () => {
       if (this.meetings.has(m.id)) {
         throw new HttpError(409, 'meeting_exists', 'Já existe uma reunião com este ID. Importação recusada para não sobrescrever resultados.');
@@ -327,4 +336,4 @@ class Store {
   }
 }
 
-module.exports = { Store, writeFileAtomic, EXPORT_FORMAT, deepFreeze };
+module.exports = { Store, writeFileAtomic, EXPORT_FORMAT, deepFreeze, skip };

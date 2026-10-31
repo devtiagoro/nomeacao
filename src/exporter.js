@@ -37,10 +37,8 @@ function resultsCsv(meeting, officeIds = null) {
     rows.push([...base, 'abstencao', '', 'Abstenção', r.abstentions, '', num(r.abstentionPctCast)]);
     rows.push([...base, 'total', '', 'Votos registrados', r.castVotes, '', '100']);
     rows.push([...base, 'total', '', 'Votos válidos (sem abstenção)', r.validVotes, '', '']);
-    rows.push([...base, 'participacao', '', 'Credenciais ativas que NÃO votaram', r.notVotedCredentials, '', '']);
-    rows.push([...base, 'participacao', '', 'Previstos sem voto registrado', r.missingVsExpected, '', '']);
-    rows.push([...base, 'participacao', '', 'Credenciais ativas', r.credentialsActive, '', '']);
-    rows.push([...base, 'participacao', '', 'Participantes previstos', r.expectedParticipants, '', '']);
+    // Pessoas presentes é o número informado pela mesa; não é derivado dos votos.
+    rows.push([...base, 'presenca', '', 'Pessoas presentes (informado)', r.presentParticipants ?? r.expectedParticipants, '', '']);
     rows.push([...base, 'resumo', '', r.tie ? 'Empate entre os mais votados' : 'Sem empate', r.leaders.length, '', '']);
     rows.push([...base, 'integridade', '', `sha256:${o.resultHash}`, '', '', '']);
   }

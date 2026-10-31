@@ -6,11 +6,11 @@
     <title>Apresentação — Nomeia</title>
     <meta name="theme-color" content="#052029" />
     <meta name="color-scheme" content="dark" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/css/style.css" />
-    <link rel="stylesheet" href="/css/apresentacao.css" />
-    <script type="module" src="/js/apresentacao.js"></script>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/apresentacao.css" />
+    <script type="module" src="js/apresentacao.js"></script>
   </head>
   <body class="page-stage">
     <div id="stage" class="stage" data-view="loading">
@@ -47,24 +47,22 @@
               <img id="qr" alt="QR Code com o link público da reunião" width="280" height="280" />
             </div>
             <p id="public-link" class="stage-link mono"></p>
-            <p class="stage-note">Para votar, use sua credencial individual (cartão ou QR pessoal).</p>
+            <p class="stage-note">Leia o QR Code e vote pelo celular, sem cadastro.</p>
           </section>
 
           <section id="turnout-card" class="stage-card" aria-labelledby="turnout-title">
-            <h2 id="turnout-title"><span data-icon="users"></span>Participação</h2>
+            <h2 id="turnout-title"><span data-icon="ballot"></span>Votação</h2>
             <div class="stage-stats">
               <div>
                 <span class="stage-stat-value" id="t-voted">0</span>
                 <span class="stage-stat-label">votos recebidos</span>
               </div>
               <div class="stage-stat-pending">
-                <span class="stage-stat-value" id="t-pending">0</span>
-                <span class="stage-stat-label">pendentes</span>
+                <span class="stage-stat-value" id="t-expected">0</span>
+                <span class="stage-stat-label">pessoas presentes</span>
               </div>
             </div>
-            <div class="progress stage-progress" aria-hidden="true"><span id="t-bar"></span></div>
-            <p class="stage-note"><strong id="t-pct">0%</strong> de <span id="t-expected">0</span> participantes previstos</p>
-            <p id="t-note" class="stage-note">Votos confirmados pelo servidor, não aparelhos conectados.</p>
+            <p id="t-note" class="stage-note">Votos enviados e pessoas presentes são contados separadamente.</p>
           </section>
         </aside>
       </main>

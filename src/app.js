@@ -3,9 +3,8 @@
 const http = require('node:http');
 const https = require('node:https');
 const fs = require('node:fs');
-const crypto = require('node:crypto');
 const { loadConfig, ensureAdminSecret } = require('./config');
-const { Store } = require('./store');
+const { Store, skip } = require('./store');
 const { Hub } = require('./realtime');
 const D = require('./domain');
 const S = require('./security');
@@ -23,11 +22,6 @@ function makeLogger(quiet) {
     warn: (msg) => !quiet && console.warn(`${stamp()} WARN  ${msg}`),
     error: (msg) => console.error(`${stamp()} ERROR ${msg}`),
   };
-}
-
-function bearer(req) {
-  const m = /^Bearer ([A-Za-z0-9_\- ]{1,100})$/.exec(String(req.headers.authorization || ''));
-  return m ? m[1] : null;
 }
 
 /**
@@ -67,117 +61,73 @@ function createApp(overrides = {}) {
     res.setHeader('Set-Cookie', parts.join('; '));
   }
 
-  async function issueCard(base, meetingId, p, token, code) {
-    const link = `${base}/votar.html?m=${encodeURIComponent(meetingId)}#t=${token}`;
-    return { participantId: p.id, label: p.label, code: S.formatCode(code), link, qr: await qrDataUrl(link) };
-  }
+  const votingUrl = (req, id) => `${H.appBase(req, cfg)}votar.html?m=${encodeURIComponent(id)}`;
+  const presentationUrl = (req, id) => `${H.appBase(req, cfg)}apresentacao.html?m=${encodeURIComponent(id)}`;
 
-  function genCredential(m) {
-    for (;;) {
-      const token = S.newToken();
-      const code = S.newCode();
-      const th = S.tokenHash(token);
-      const ch = S.codeHash(code);
-      const clash = (h) => store.lookupCredential(h) || m.participants.some((p) => p.tokenHash === h || p.codeHash === h);
-      if (!clash(th) && !clash(ch)) return { token, code, th, ch };
-    }
-  }
-
-  /** Resolve a credencial dentro da reunião, comparando hashes em tempo constante. */
-  function resolveParticipant(m, raw) {
-    const hash = S.credentialHash(raw);
-    const ref = store.lookupCredential(hash);
-    if (!ref || ref.meetingId !== m.id) return null;
-    const p = m.participants.find((x) => x.id === ref.participantId);
-    if (!p) return null;
-    return S.safeEqualHex(hash, p.tokenHash) || S.safeEqualHex(hash, p.codeHash) ? p : null;
-  }
-
-  // ---------------- Público ----------------
+  // ---------------- Público (sem login) ----------------
 
   route('GET', '/api/health', () => ({ ok: true }));
+
+  /** Reuniões disponíveis (não encerradas), para a página inicial. */
+  route('GET', '/api/meetings', () =>
+    store
+      .list()
+      .filter((m) => m.status === 'active')
+      .map((m) => ({ id: m.id, name: m.name, phase: D.phase(m), createdAt: m.createdAt })),
+  );
 
   route('GET', '/api/meetings/:id', ({ params }) => D.publicSnapshot(store.require(params.id)));
 
   route('GET', '/api/meetings/:id/link', ({ params, req }) => {
     store.require(params.id);
-    return { publicUrl: `${H.publicBase(req, cfg)}/votar.html?m=${encodeURIComponent(params.id)}` };
+    return { publicUrl: votingUrl(req, params.id), presentationUrl: presentationUrl(req, params.id) };
   });
 
   route('GET', '/api/meetings/:id/qr.svg', async ({ params, req, res }) => {
     store.require(params.id);
-    const svg = await qrSvg(`${H.publicBase(req, cfg)}/votar.html?m=${encodeURIComponent(params.id)}`);
-    res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-cache' });
+    const svg = await qrSvg(votingUrl(req, params.id));
+    // O QR pode ser exibido pela apresentação hospedada em outra origem (ex.: GitHub Pages).
+    res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-cache', 'Cross-Origin-Resource-Policy': 'cross-origin' });
     res.end(svg);
   });
 
-  route('POST', '/api/credentials/check', async ({ req, ip }) => {
-    if (limiter.blocked('credFail', ip) || !limiter.hit('credCheck', ip)) {
-      throw new HttpError(429, 'rate_limited', 'Muitas tentativas. Aguarde alguns minutos.');
-    }
-    const raw = bearer(req);
-    if (!raw) throw new HttpError(401, 'credential_required', 'Informe a credencial de votação.');
-    const ref = store.lookupCredential(S.credentialHash(raw));
-    let m = ref && store.get(ref.meetingId);
-    let p = m && resolveParticipant(m, raw);
-    if (!p) {
-      limiter.hit('credFail', ip);
-      throw new HttpError(401, 'invalid_credential', 'Credencial não reconhecida.');
-    }
-    if (!p.firstSeenAt && !p.revoked && m.status === 'active') {
-      ({ meeting: m } = await store.mutate(m.id, (draft) => {
-        const dp = draft.participants.find((x) => x.id === p.id);
-        if (dp && !dp.firstSeenAt) dp.firstSeenAt = D.now();
-      }));
-      p = m.participants.find((x) => x.id === p.id);
-      hub.broadcast(m.id, 'turnout_updated');
-    }
-    return {
-      meetingId: m.id,
-      meetingName: m.name,
-      participant: { label: p.label, revoked: p.revoked },
-      votedOfficeIds: m.offices.filter((o) => o.voterIds.includes(p.id)).map((o) => o.id),
-    };
-  });
-
-  route('POST', '/api/meetings/:id/votes', async ({ req, params, body, ip }) => {
-    if (!limiter.hit('vote', ip)) throw new HttpError(429, 'rate_limited', 'Muitas tentativas. Aguarde um momento.');
-    const raw = bearer(req);
-    if (!raw) throw new HttpError(401, 'credential_required', 'É necessária uma credencial de votação para votar.');
+  /**
+   * Voto público: qualquer pessoa com o link vota, quantas vezes confirmar.
+   * requestId identifica UMA confirmação (gerado no navegador). Reenvios do mesmo requestId
+   * (duplo clique, retransmissão após falha de rede) são reconhecidos e não contam de novo.
+   * Uma nova confirmação intencional gera outro requestId e conta como novo voto.
+   */
+  route('POST', '/api/meetings/:id/votes', async ({ params, body }) => {
     const officeId = typeof body.officeId === 'string' ? body.officeId : '';
     const choice = typeof body.choice === 'string' ? body.choice : '';
-    if (!D.ID_RE.test(officeId) || !(choice === D.ABSTAIN || D.ID_RE.test(choice))) {
+    const requestId = typeof body.requestId === 'string' ? body.requestId : '';
+    if (!D.ID_RE.test(officeId) || !(choice === D.ABSTAIN || D.ID_RE.test(choice)) || !D.REQUEST_ID_RE.test(requestId)) {
       throw new HttpError(400, 'invalid_input', 'Voto inválido.');
     }
     store.require(params.id);
     // Toda a validação acontece dentro da fila serializada da reunião, sobre o estado confirmado.
-    await store.mutate(params.id, (m) => {
-      const p = resolveParticipant(m, raw);
-      if (!p) {
-        limiter.hit('credFail', ip);
-        throw new HttpError(403, 'invalid_credential', 'Credencial inválida para esta reunião.');
-      }
-      if (p.revoked) throw new HttpError(403, 'credential_revoked', 'Esta credencial foi revogada.');
-      D.assertActive(m);
+    const { result } = await store.mutate(params.id, (m) => {
       const o = D.findOffice(m, officeId);
+      if (o.requestIds.includes(requestId)) return skip({ duplicate: true });
+      D.assertActive(m);
       if (o.id !== m.currentOfficeId || o.status !== 'voting_open') {
         throw o.status === 'closed'
           ? new HttpError(409, 'voting_closed', 'A votação deste cargo já foi encerrada. Voto não registrado.')
           : new HttpError(409, 'voting_not_open', 'A votação deste cargo não está aberta.');
       }
-      if (o.voterIds.includes(p.id)) {
-        throw new HttpError(409, 'already_voted', 'Seu voto para este cargo já foi registrado.');
-      }
+      if (D.totalVotes(o) >= D.LIMITS.votesPerOffice) throw new HttpError(409, 'limit', 'Limite de votos do cargo atingido.');
       if (choice === D.ABSTAIN) {
         o.tally.abstain++;
       } else {
         if (!o.candidates.some((c) => c.id === choice)) throw new HttpError(400, 'invalid_choice', 'Opção inválida.');
         o.tally.byCandidate[choice] = (o.tally.byCandidate[choice] || 0) + 1;
       }
-      // Posição aleatória: a ordem da lista não revela a ordem dos votos.
-      o.voterIds.splice(crypto.randomInt(o.voterIds.length + 1), 0, p.id);
-      if (!p.firstSeenAt) p.firstSeenAt = D.now();
+      o.requestIds.push(requestId);
+      return { duplicate: false };
     });
+    if (result.duplicate) {
+      return { status: 200, body: { status: 'duplicate', officeId, message: 'Este voto já havia sido registrado.' } };
+    }
     hub.broadcast(params.id, 'vote_accepted');
     return { status: 201, body: { status: 'accepted', officeId, message: 'Voto registrado.' } };
   });
@@ -222,7 +172,6 @@ function createApp(overrides = {}) {
       createdAt: m.createdAt,
       updatedAt: m.updatedAt,
       offices: m.offices.length,
-      participants: m.participants.length,
     })),
   );
 
@@ -237,13 +186,8 @@ function createApp(overrides = {}) {
 
   route('GET', '/api/admin/meetings/:id/links', async ({ params, req }) => {
     store.require(params.id);
-    const base = H.publicBase(req, cfg);
-    const publicUrl = `${base}/votar.html?m=${encodeURIComponent(params.id)}`;
-    return {
-      publicUrl,
-      presentationUrl: `${base}/apresentacao.html?m=${encodeURIComponent(params.id)}`,
-      qr: await qrDataUrl(publicUrl),
-    };
+    const publicUrl = votingUrl(req, params.id);
+    return { publicUrl, presentationUrl: presentationUrl(req, params.id), qr: await qrDataUrl(publicUrl) };
   });
 
   route('PATCH', '/api/admin/meetings/:id', async ({ params, body }) => {
@@ -271,73 +215,6 @@ function createApp(overrides = {}) {
     await store.withLock(params.id, () => store.appendLedger(params.id, { type: 'meeting_archived', meetingVersion: meeting.version }));
     await store.backup(params.id, 'archived');
     return D.adminSnapshot(store.get(params.id));
-  });
-
-  // ---------------- Credenciais ----------------
-
-  route('POST', '/api/admin/meetings/:id/credentials', async ({ params, body, req }) => {
-    const count = D.cleanInt(body.count, 'count', 1, D.LIMITS.credentialsPerRequest);
-    const prefix = D.cleanText(body.labelPrefix ?? 'Credencial', 'labelPrefix', { max: D.LIMITS.labelPrefixMax });
-    const { result: issued } = await store.mutate(params.id, (m) => {
-      D.assertActive(m);
-      if (m.participants.length + count > D.LIMITS.credentialsPerMeeting) {
-        throw new HttpError(409, 'limit', `Limite de ${D.LIMITS.credentialsPerMeeting} credenciais por reunião.`);
-      }
-      const out = [];
-      for (let i = 0; i < count; i++) {
-        const { token, code, th, ch } = genCredential(m);
-        m.participantSeq++;
-        const p = {
-          id: S.newId('p'),
-          label: `${prefix} ${String(m.participantSeq).padStart(3, '0')}`,
-          tokenHash: th,
-          codeHash: ch,
-          createdAt: D.now(),
-          firstSeenAt: null,
-          reissuedAt: null,
-          revoked: false,
-          revokedAt: null,
-        };
-        m.participants.push(p);
-        out.push({ p, token, code });
-      }
-      return out;
-    });
-    hub.broadcast(params.id, 'turnout_updated');
-    const base = H.publicBase(req, cfg);
-    const cards = [];
-    for (const { p, token, code } of issued) cards.push(await issueCard(base, params.id, p, token, code));
-    return { status: 201, body: { issued: cards } };
-  });
-
-  route('POST', '/api/admin/meetings/:id/participants/:pid/reissue', async ({ params, req }) => {
-    const { result } = await store.mutate(params.id, (m) => {
-      D.assertActive(m);
-      const p = m.participants.find((x) => x.id === params.pid);
-      if (!p) throw new HttpError(404, 'participant_not_found', 'Credencial não encontrada.');
-      if (p.revoked) throw new HttpError(409, 'credential_revoked', 'Credencial revogada não pode ser reemitida.');
-      const { token, code, th, ch } = genCredential(m);
-      p.tokenHash = th;
-      p.codeHash = ch;
-      p.reissuedAt = D.now();
-      return { p: { ...p }, token, code };
-    });
-    hub.broadcast(params.id, 'turnout_updated');
-    return { issued: [await issueCard(H.publicBase(req, cfg), params.id, result.p, result.token, result.code)] };
-  });
-
-  route('POST', '/api/admin/meetings/:id/participants/:pid/revoke', async ({ params }) => {
-    const { meeting } = await store.mutate(params.id, (m) => {
-      D.assertActive(m);
-      const p = m.participants.find((x) => x.id === params.pid);
-      if (!p) throw new HttpError(404, 'participant_not_found', 'Credencial não encontrada.');
-      if (!p.revoked) {
-        p.revoked = true;
-        p.revokedAt = D.now();
-      }
-    });
-    hub.broadcast(params.id, 'turnout_updated');
-    return D.adminSnapshot(meeting);
   });
 
   // ---------------- Cargos e candidatos ----------------
@@ -560,6 +437,13 @@ function createApp(overrides = {}) {
 
   // ---------------- Despacho ----------------
 
+  /** CORS apenas para a API pública e apenas para origens autorizadas (ex.: GitHub Pages). */
+  function corsOrigin(req, url) {
+    const origin = req.headers.origin;
+    if (!origin || url.pathname.startsWith('/api/admin/') || !url.pathname.startsWith('/api/')) return null;
+    return cfg.allowedOrigins.includes(origin) && !H.isOwnOrigin(origin, req, cfg) ? origin : null;
+  }
+
   async function handleApi(req, res, url, ip) {
     const candidates = routes.filter((r) => r.re.test(url.pathname));
     if (!candidates.length) return H.notFound(res);
@@ -568,12 +452,13 @@ function createApp(overrides = {}) {
 
     const mutating = req.method !== 'GET' && req.method !== 'HEAD';
     if (mutating) {
-      // Proteção CSRF: cabeçalho customizado (exige preflight CORS, que nunca autorizamos),
-      // origem conferida e bloqueio de requisições cross-site.
+      // Proteção CSRF: cabeçalho customizado (exige preflight CORS) e origem conferida.
+      // Rotas administrativas aceitam somente a própria origem do servidor.
       const origin = req.headers.origin;
+      const external = Boolean(origin) && !r.admin && cfg.allowedOrigins.includes(origin);
       if (req.headers['x-nomeia'] !== '1') throw new HttpError(403, 'forbidden', 'Requisição recusada.');
-      if (origin && !H.isAllowedOrigin(origin, req, cfg)) throw new HttpError(403, 'forbidden_origin', 'Origem não permitida.');
-      if (req.headers['sec-fetch-site'] === 'cross-site') throw new HttpError(403, 'forbidden_origin', 'Origem não permitida.');
+      if (origin && !(H.isOwnOrigin(origin, req, cfg) || external)) throw new HttpError(403, 'forbidden_origin', 'Origem não permitida.');
+      if (req.headers['sec-fetch-site'] === 'cross-site' && !external) throw new HttpError(403, 'forbidden_origin', 'Origem não permitida.');
     }
     if (r.admin) {
       if (!sessions.valid(sessionOf(req))) throw new HttpError(401, 'unauthorized', 'Acesso administrativo necessário.');
@@ -608,11 +493,26 @@ function createApp(overrides = {}) {
       return res.end();
     }
     res.on('finish', () => {
-      // Log sem query string, cabeçalhos ou corpo: tokens nunca aparecem aqui.
+      // Log sem query string, cabeçalhos ou corpo.
       if (url.pathname.startsWith('/api/')) log.info(`${req.method} ${url.pathname} ${res.statusCode} ${Date.now() - started}ms`);
     });
     H.securityHeaders(req, res, cfg);
+    const cors = corsOrigin(req, url);
+    if (cors) {
+      res.setHeader('Access-Control-Allow-Origin', cors);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    }
     try {
+      if (req.method === 'OPTIONS' && url.pathname.startsWith('/api/')) {
+        if (!cors) throw new HttpError(403, 'forbidden_origin', 'Origem não permitida.');
+        res.writeHead(204, {
+          'Access-Control-Allow-Methods': 'GET, POST',
+          'Access-Control-Allow-Headers': 'Content-Type, X-Nomeia',
+          'Access-Control-Max-Age': '600',
+        });
+        return res.end();
+      }
       if (!limiter.hit('global', ip)) throw new HttpError(429, 'rate_limited', 'Muitas requisições.');
       if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url, ip);
       const meetingParam = url.searchParams.get('m');
@@ -622,7 +522,7 @@ function createApp(overrides = {}) {
         }
         // Manifesto vinculado à reunião: a PWA instalada abre direto na tela de votação dela.
         const manifest = JSON.parse(buf.toString('utf8'));
-        manifest.start_url = `/votar.html?m=${meetingParam}`;
+        manifest.start_url = `./votar.html?m=${meetingParam}`;
         return Buffer.from(JSON.stringify(manifest));
       });
     } catch (err) {

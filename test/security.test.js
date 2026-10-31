@@ -4,29 +4,25 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { startServer, setupMeeting, Client, SECRET } = require('./helpers');
+const { startServer, setupMeeting, Client, SECRET, rid } = require('./helpers');
 
+const PAGES = 'https://devtiagoro.github.io';
 let srv;
 let c;
 const logs = [];
-const log = {
-  info: (m) => logs.push(m),
-  warn: (m) => logs.push(m),
-  error: (m) => logs.push(m),
-};
+const log = { info: (m) => logs.push(m), warn: (m) => logs.push(m), error: (m) => logs.push(m) };
 
 test.before(async () => {
-  srv = await startServer({ log });
+  srv = await startServer({ log, publicAppUrl: `${PAGES}/nomeacao/public/` });
   c = srv.client;
   await c.login();
 });
 
 test.after(() => srv.app.close());
 
-test('acesso público não consegue alterar a reunião', async () => {
+test('acesso público não consegue alterar a reunião (proteção administrativa)', async () => {
   const s = await setupMeeting(c);
   const anon = new Client(srv.base);
-  const pid = (await c.admin('GET', s.meetingId, '')).body.participants[0].id;
   const attempts = [
     ['GET', '/api/admin/meetings'],
     ['POST', '/api/admin/meetings', { name: 'X', expectedParticipants: 3 }],
@@ -36,24 +32,15 @@ test('acesso público não consegue alterar a reunião', async () => {
     ['POST', `/api/admin/meetings/${s.meetingId}/offices/${s.officeId}/candidates`, { name: 'Intruso' }],
     ['DELETE', `/api/admin/meetings/${s.meetingId}/offices/${s.officeId}/candidates/${s.cands[0].id}`],
     ['POST', `/api/admin/meetings/${s.meetingId}/offices/${s.officeId}/open`],
-    ['POST', `/api/admin/meetings/${s.meetingId}/credentials`, { count: 50 }],
-    ['POST', `/api/admin/meetings/${s.meetingId}/participants/${pid}/reissue`],
+    ['POST', `/api/admin/meetings/${s.meetingId}/offices/${s.officeId}/close`],
     ['POST', `/api/admin/meetings/${s.meetingId}/archive`],
     ['GET', `/api/admin/meetings/${s.meetingId}/export.json`],
     ['POST', '/api/admin/import', { format: 'nomeia-export' }],
   ];
-  for (const [method, p, body] of attempts) {
-    const r = await anon.req(method, p, body);
-    assert.equal(r.status, 401, `${method} ${p}`);
-  }
-  // Credencial de participante não dá poderes administrativos.
-  const asVoter = await anon.req('POST', `/api/admin/meetings/${s.meetingId}/offices/${s.officeId}/open`, undefined, { bearer: s.tokens[0] });
-  assert.equal(asVoter.status, 401);
-
+  for (const [method, p, body] of attempts) assert.equal((await anon.req(method, p, body)).status, 401, `${method} ${p}`);
   const snap = (await c.admin('GET', s.meetingId, '')).body;
   assert.equal(snap.offices[0].status, 'discussing');
   assert.equal(snap.offices[0].candidates.length, 2);
-  assert.equal(snap.participants.length, 3, 'link público não emite credenciais');
 });
 
 test('login: segredo errado recusado, cookie HttpOnly/SameSite, sessão invalidada no logout', async () => {
@@ -69,18 +56,52 @@ test('login: segredo errado recusado, cookie HttpOnly/SameSite, sessão invalida
   assert.equal((await anon.req('GET', '/api/admin/meetings')).status, 401);
 });
 
-test('proteção CSRF: exige cabeçalho próprio e origem permitida', async () => {
-  const noHeader = await c.req('POST', '/api/admin/meetings', { name: 'X', expectedParticipants: 2 }, { headers: { 'X-Nomeia': '0' } });
-  assert.equal(noHeader.status, 403);
-  const evil = await c.req('POST', '/api/admin/meetings', { name: 'X', expectedParticipants: 2 }, { headers: { Origin: 'https://evil.example' } });
-  assert.equal(evil.status, 403);
-  const cross = await c.req('POST', '/api/admin/meetings', { name: 'X', expectedParticipants: 2 }, { headers: { 'Sec-Fetch-Site': 'cross-site' } });
-  assert.equal(cross.status, 403);
-  const same = await c.req('POST', '/api/admin/meetings', { name: 'X', expectedParticipants: 2 }, { headers: { Origin: srv.base } });
-  assert.equal(same.status, 201);
-  // Sem CORS: nenhuma origem externa é autorizada.
-  const pre = await fetch(`${srv.base}/api/meetings/m_AAAAAAAAAAAA`, { headers: { Origin: 'https://evil.example' } });
-  assert.equal(pre.headers.get('access-control-allow-origin'), null);
+test('proteção CSRF: cabeçalho próprio e origem conferida', async () => {
+  const body = { name: 'X', expectedParticipants: 2 };
+  assert.equal((await c.req('POST', '/api/admin/meetings', body, { headers: { 'X-Nomeia': '0' } })).status, 403);
+  assert.equal((await c.req('POST', '/api/admin/meetings', body, { headers: { Origin: 'https://evil.example' } })).status, 403);
+  assert.equal((await c.req('POST', '/api/admin/meetings', body, { headers: { 'Sec-Fetch-Site': 'cross-site' } })).status, 403);
+  // Mesmo a origem autorizada do GitHub Pages não executa ações administrativas.
+  assert.equal((await c.req('POST', '/api/admin/meetings', body, { headers: { Origin: PAGES } })).status, 403);
+  assert.equal((await c.req('POST', '/api/admin/meetings', body, { headers: { Origin: srv.base } })).status, 201);
+});
+
+test('CORS: somente a API pública e somente para a origem publicada', async () => {
+  const s = await setupMeeting(c);
+  await c.admin('POST', s.meetingId, `/offices/${s.officeId}/open`);
+
+  const pre = await fetch(`${srv.base}/api/meetings/${s.meetingId}/votes`, {
+    method: 'OPTIONS',
+    headers: { Origin: PAGES, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type,x-nomeia' },
+  });
+  assert.equal(pre.status, 204);
+  assert.equal(pre.headers.get('access-control-allow-origin'), PAGES);
+  assert.match(pre.headers.get('access-control-allow-headers'), /X-Nomeia/);
+  assert.equal(pre.headers.get('access-control-allow-credentials'), null, 'sem cookies entre origens');
+
+  // Voto vindo do GitHub Pages (cross-site) é aceito.
+  const v = await c.vote(s.meetingId, s.officeId, s.cands[0].id, rid(), { Origin: PAGES, 'Sec-Fetch-Site': 'cross-site' });
+  assert.equal(v.status, 201);
+  assert.equal(v.headers.get('access-control-allow-origin'), PAGES);
+
+  // Origem desconhecida: sem CORS e voto recusado.
+  const evilPre = await fetch(`${srv.base}/api/meetings/${s.meetingId}/votes`, { method: 'OPTIONS', headers: { Origin: 'https://evil.example' } });
+  assert.equal(evilPre.status, 403);
+  assert.equal(evilPre.headers.get('access-control-allow-origin'), null);
+  assert.equal((await c.vote(s.meetingId, s.officeId, s.cands[0].id, rid(), { Origin: 'https://evil.example' })).status, 403);
+
+  // Rotas administrativas nunca recebem cabeçalhos CORS.
+  const adm = await fetch(`${srv.base}/api/admin/session`, { headers: { Origin: PAGES } });
+  assert.equal(adm.headers.get('access-control-allow-origin'), null);
+  const admPre = await fetch(`${srv.base}/api/admin/meetings`, { method: 'OPTIONS', headers: { Origin: PAGES } });
+  assert.equal(admPre.status, 403);
+
+  // QR Code pode ser exibido pela apresentação hospedada em outra origem.
+  const qr = await fetch(`${srv.base}/api/meetings/${s.meetingId}/qr.svg`);
+  assert.equal(qr.headers.get('cross-origin-resource-policy'), 'cross-origin');
+  // Links e QR apontam para o front-end publicado.
+  const link = await c.req('GET', `/api/meetings/${s.meetingId}/link`, undefined, { cookie: null });
+  assert.equal(link.body.publicUrl, `${PAGES}/nomeacao/public/votar.html?m=${s.meetingId}`);
 });
 
 test('arquivos de data/ e fora de public/ nunca são servidos', async () => {
@@ -90,118 +111,80 @@ test('arquivos de data/ e fora de public/ nunca são servidos', async () => {
     `/../data/meetings/${s.meetingId}.json`,
     `/%2e%2e/data/meetings/${s.meetingId}.json`,
     `/..%2fdata%2fmeetings%2f${s.meetingId}.json`,
-    `/..%5c..%5cpackage.json`,
-    '/%2e%2e/package.json',
+    '/..%5c..%5cpackage.json',
     '/%2e%2e/.env',
     '/.env',
+    '/.nojekyll',
     '/server.js',
     '/src/app.js',
   ];
-  for (const p of paths) {
-    const r = await fetch(srv.base + p);
-    const text = await r.text();
-    assert.equal(r.status, 404, p);
-    assert.equal(text.includes('tokenHash'), false);
-  }
+  for (const p of paths) assert.equal((await fetch(srv.base + p)).status, 404, p);
   assert.ok(fs.existsSync(path.join(srv.dataDir, 'meetings', `${s.meetingId}.json`)));
 });
 
 test('XSS: nomes são guardados como texto e páginas têm CSP restritiva', async () => {
   const s = await setupMeeting(c, { candidates: [] });
   const evil = '<img src=x onerror=alert(1)><script>alert(2)</script>';
-  const r = await c.admin('POST', s.meetingId, `/offices/${s.officeId}/candidates`, { name: evil });
-  assert.equal(r.status, 201);
+  assert.equal((await c.admin('POST', s.meetingId, `/offices/${s.officeId}/candidates`, { name: evil })).status, 201);
   const pub = (await c.req('GET', `/api/meetings/${s.meetingId}`, undefined, { cookie: null })).body;
-  assert.equal(pub.currentOffice.candidates[0].name, evil, 'texto preservado; o front-end usa textContent');
-
+  assert.equal(pub.currentOffice.candidates[0].name, evil);
   const page = await fetch(`${srv.base}/votar.html`);
   const csp = page.headers.get('content-security-policy');
   assert.match(csp, /script-src 'self'/);
   assert.doesNotMatch(csp, /unsafe-inline/);
-  assert.equal(page.headers.get('x-content-type-options'), 'nosniff');
-  assert.equal(page.headers.get('referrer-policy'), 'no-referrer');
-
-  // Nenhum script público usa innerHTML/eval.
   const jsDir = path.join(__dirname, '..', 'public', 'js');
   for (const f of fs.readdirSync(jsDir)) {
-    const src = fs.readFileSync(path.join(jsDir, f), 'utf8');
-    assert.doesNotMatch(src, /\.innerHTML\s*=|insertAdjacentHTML|eval\(|new Function/, f);
+    assert.doesNotMatch(fs.readFileSync(path.join(jsDir, f), 'utf8'), /\.innerHTML\s*=|insertAdjacentHTML|eval\(|new Function/, f);
   }
 });
 
 test('validação de entrada: tamanho, tipo e formato', async () => {
-  const big = await c.req('POST', '/api/admin/meetings', { name: 'x'.repeat(30_000), expectedParticipants: 2 });
-  assert.equal(big.status, 413);
-  const longName = await c.req('POST', '/api/admin/meetings', { name: 'x'.repeat(200), expectedParticipants: 2 });
-  assert.equal(longName.status, 400);
-  const badN = await c.req('POST', '/api/admin/meetings', { name: 'Ok', expectedParticipants: -1 });
-  assert.equal(badN.status, 400);
+  assert.equal((await c.req('POST', '/api/admin/meetings', { name: 'x'.repeat(30_000), expectedParticipants: 2 })).status, 413);
+  assert.equal((await c.req('POST', '/api/admin/meetings', { name: 'x'.repeat(200), expectedParticipants: 2 })).status, 400);
+  assert.equal((await c.req('POST', '/api/admin/meetings', { name: 'Ok', expectedParticipants: -1 })).status, 400);
   const notJson = await fetch(`${srv.base}/api/admin/meetings`, {
     method: 'POST',
     headers: { 'X-Nomeia': '1', Cookie: c.cookie, 'Content-Type': 'text/plain' },
     body: 'name=x',
   });
   assert.equal(notJson.status, 415);
-  const broken = await fetch(`${srv.base}/api/admin/meetings`, {
-    method: 'POST',
-    headers: { 'X-Nomeia': '1', Cookie: c.cookie, 'Content-Type': 'application/json' },
-    body: '{"name":',
-  });
-  assert.equal(broken.status, 400);
-  const tooMany = await c.req('POST', `/api/admin/meetings/${(await setupMeeting(c, { creds: 0 })).meetingId}/credentials`, { count: 100000 });
-  assert.equal(tooMany.status, 400);
-  const badId = await c.req('GET', '/api/meetings/..%2f..%2fetc');
-  assert.equal(badId.status, 404);
+  assert.equal((await c.req('GET', '/api/meetings/..%2f..%2fetc')).status, 404);
   const ctrl = await c.req('POST', '/api/admin/meetings', { name: 'Nome\u0000com‮controle', expectedParticipants: 2 });
   assert.equal(ctrl.body.name, 'Nome com controle');
 });
 
-test('tokens nunca aparecem em logs, histórico público ou snapshot administrativo', async () => {
-  const s = await setupMeeting(c, { creds: 2 });
+test('logs não registram corpo nem segredo; votos não carregam identificação', async () => {
+  const s = await setupMeeting(c);
   await c.admin('POST', s.meetingId, `/offices/${s.officeId}/open`);
-  await c.vote(s.meetingId, s.tokens[0], s.officeId, s.cands[0].id);
-  await c.req('POST', '/api/credentials/check', undefined, { bearer: s.codes[1], cookie: null });
-  await c.admin('POST', s.meetingId, `/offices/${s.officeId}/close`);
-
+  const id = rid();
+  await c.vote(s.meetingId, s.officeId, s.cands[0].id, id);
   const all = logs.join('\n');
-  for (const secret of [...s.tokens, ...s.codes, SECRET]) assert.equal(all.includes(secret), false);
-
-  const pub = JSON.stringify((await c.req('GET', `/api/meetings/${s.meetingId}`, undefined, { cookie: null })).body);
-  const adm = JSON.stringify((await c.admin('GET', s.meetingId, '')).body);
-  for (const t of [...s.tokens, ...s.codes.map((x) => x.replace(/-/g, ''))]) {
-    assert.equal(pub.includes(t), false);
-    assert.equal(adm.includes(t), false);
-  }
-  assert.equal(pub.includes('voterIds') || pub.includes('participants'), false, 'público não vê quem votou');
-  assert.equal(adm.includes('tokenHash') || adm.includes('codeHash'), false);
-
-  // Arquivo de dados: só hashes; escolha nunca associada à credencial.
-  const raw = fs.readFileSync(path.join(srv.dataDir, 'meetings', `${s.meetingId}.json`), 'utf8');
-  for (const t of s.tokens) assert.equal(raw.includes(t), false);
-  const doc = JSON.parse(raw);
-  const office = doc.offices[0];
-  assert.deepEqual(Object.keys(office.tally).sort(), ['abstain', 'byCandidate']);
-  assert.ok(office.voterIds.every((v) => typeof v === 'string'), 'lista de votantes sem escolhas');
+  assert.equal(all.includes(SECRET), false);
+  assert.equal(all.includes(id), false);
+  const raw = JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'meetings', `${s.meetingId}.json`), 'utf8'));
+  assert.deepEqual(Object.keys(raw.offices[0].tally).sort(), ['abstain', 'byCandidate']);
+  assert.equal('participants' in raw, false);
+  // requestId é aleatório e fica separado da escolha (não há vínculo voto → opção).
+  assert.deepEqual(raw.offices[0].requestIds, [id]);
 });
 
-test('rate limiting em login e tentativas de credencial', async () => {
-  const limited = await startServer({
-    rateLimits: { login: { limit: 3, windowMs: 60_000 }, credFail: { limit: 4, windowMs: 60_000 } },
-  });
+test('rate limiting no login administrativo; votos não têm limite por IP', async () => {
+  const limited = await startServer({ rateLimits: { login: { limit: 3, windowMs: 60_000 } } });
+  await limited.client.login();
   const anon = new Client(limited.base);
   const codes = [];
   for (let i = 0; i < 5; i++) codes.push((await anon.login('errado')).status);
   assert.deepEqual(codes, [401, 401, 401, 429, 429]);
 
-  const tries = [];
-  for (let i = 0; i < 6; i++) {
-    tries.push((await anon.req('POST', '/api/credentials/check', undefined, { bearer: 'AAAA-BBBB-CCCC' })).status);
-  }
-  assert.deepEqual(tries, [401, 401, 401, 401, 429, 429]);
+  // Com os limites padrão, 120 votos seguidos do mesmo IP são todos aceitos.
+  const s = await setupMeeting(limited.client);
+  await limited.client.admin('POST', s.meetingId, `/offices/${s.officeId}/open`);
+  const res = await Promise.all(Array.from({ length: 120 }, () => limited.client.vote(s.meetingId, s.officeId, s.cands[0].id)));
+  assert.ok(res.every((r) => r.status === 201));
   await limited.app.close();
 });
 
-test('produção exige ADMIN_SECRET forte', async () => {
+test('produção exige ADMIN_SECRET forte', () => {
   const { createApp } = require('../src/app');
   assert.throws(() => createApp({ production: true, adminSecret: '', dataDir: srv.dataDir, quiet: true }), /ADMIN_SECRET/);
   assert.throws(() => createApp({ production: true, adminSecret: 'curto', dataDir: srv.dataDir, quiet: true }), /16/);

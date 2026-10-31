@@ -10,13 +10,18 @@ import {
   renderResults,
   STATUS_LABEL,
   fmtDate,
-  fmtPct,
   plural,
   icon,
   toast,
   confirmDialog,
   emptyState,
+  isRemoteServer,
+  adminUrl,
 } from './common.js';
+
+// O painel roda sempre no próprio servidor Node: a sessão (cookie HttpOnly + SameSite=Strict)
+// não funciona a partir de outra origem, como o GitHub Pages. Nesse caso, redireciona.
+if (isRemoteServer) location.replace(adminUrl(location.search));
 
 const meetingId = new URLSearchParams(location.search).get('m');
 let state = null;
@@ -136,7 +141,7 @@ async function showDashboard() {
   body.replaceChildren(
     ...(list.length
       ? list.map((m) => {
-          const href = `/admin.html?m=${encodeURIComponent(m.id)}`;
+          const href = `admin.html?m=${encodeURIComponent(m.id)}`;
           return el(
             'tr',
             {},
@@ -162,7 +167,7 @@ $('#meeting-form').addEventListener('submit', async (ev) => {
   const m = await action(ev.submitter, () =>
     api('/api/admin/meetings', { method: 'POST', body: { name: $('#m-name').value, expectedParticipants: Number($('#m-expected').value) } }),
   );
-  if (m) location.href = `/admin.html?m=${encodeURIComponent(m.id)}`;
+  if (m) location.href = `admin.html?m=${encodeURIComponent(m.id)}`;
 });
 
 $('#import-form').addEventListener('submit', async (ev) => {
@@ -177,7 +182,7 @@ $('#import-form').addEventListener('submit', async (ev) => {
     return flash('Arquivo JSON inválido.');
   }
   const r = await action(ev.submitter, () => api('/api/admin/import', { method: 'POST', body: doc }), 'Reunião importada.');
-  if (r) location.href = `/admin.html?m=${encodeURIComponent(r.id)}`;
+  if (r) location.href = `admin.html?m=${encodeURIComponent(r.id)}`;
 });
 
 // ---------------- Reunião ----------------
@@ -231,7 +236,6 @@ function renderMeeting() {
 
   renderCurrent(archived);
   renderParticipation();
-  renderCredentials(archived);
   renderHistory();
 }
 
@@ -378,103 +382,12 @@ function renderCandidates(o, editable) {
 function renderParticipation() {
   const s = state;
   const o = currentOffice();
-  const t = s.currentTurnout;
   const r = o && (o.status === 'voting_open' ? o.live : o.status === 'closed' ? o.result : null);
+  // Pessoas presentes (informado pela mesa) e votos recebidos são números independentes.
   setText('#s-expected', s.expectedParticipants);
-  setText('#s-creds', s.participants.filter((p) => !p.revoked).length);
-  setText('#s-claimed', t ? t.credentialsClaimed : s.participants.filter((p) => !p.revoked && p.firstSeenAt).length);
   setText('#s-voted', r ? r.castVotes : '—');
-  setText('#s-missing', r ? r.notVotedCredentials : '—');
   setText('#s-abst', r ? r.abstentions : '—');
   setText('#s-valid', r ? r.validVotes : '—');
-  setText('#s-pct', r ? fmtPct(r.turnoutPctExpected) : '—');
-  $('#s-bar').style.width = `${r ? Math.min(100, (r.castVotes * 100) / Math.max(1, s.expectedParticipants)) : 0}%`;
-}
-
-function credentialBadge(p) {
-  if (p.revoked) return el('span', { class: 'badge revoked' }, 'Revogada');
-  if (p.firstSeenAt) return el('span', { class: 'badge used' }, 'Em uso');
-  return el('span', { class: 'badge' }, 'Não usada');
-}
-
-function renderCredentials(archived) {
-  const s = state;
-  const o = currentOffice();
-  if (!changed('creds', [s.participants, o?.id, o?.status, archived])) return;
-  const body = $('#cred-body');
-  if (!s.participants.length) {
-    body.replaceChildren(
-      el(
-        'tr',
-        {},
-        el(
-          'td',
-          { colspan: '4' },
-          emptyState({ iconName: 'key', title: 'Nenhuma credencial emitida', text: 'Emita uma credencial por participante presente e imprima os cartões.' }),
-        ),
-      ),
-    );
-    return;
-  }
-  body.replaceChildren(
-    ...s.participants.map((p) => {
-      let voted = el('span', { class: 'muted' }, '—');
-      if (o && o.status !== 'discussing') {
-        voted = p.votedOfficeIds.includes(o.id)
-          ? el('span', { class: 'badge ok' }, icon('check'), 'Votou')
-          : el('span', { class: 'badge' }, 'Não votou');
-      }
-      const actions = el('td', { class: 'num' });
-      if (!archived && !p.revoked) {
-        const re = el('button', { class: 'btn btn-ghost btn-sm', type: 'button', 'aria-label': `Reemitir ${p.label}` }, icon('refresh'), 'Reemitir');
-        re.addEventListener('click', async () => {
-          const ok = await confirmDialog({
-            title: `Reemitir ${p.label}?`,
-            message: 'O cartão e o QR antigos deixarão de funcionar. Votos já registrados continuam valendo uma única vez.',
-            confirmLabel: 'Reemitir',
-            iconName: 'refresh',
-          });
-          if (!ok) return;
-          const r = await action(re, () => api(mpath(`/participants/${p.id}/reissue`), { method: 'POST' }), 'Credencial reemitida.');
-          if (r) showIssued(r.issued);
-        });
-        const rv = el('button', { class: 'btn btn-ghost btn-sm', type: 'button', 'aria-label': `Revogar ${p.label}` }, 'Revogar');
-        rv.addEventListener('click', async () => {
-          const ok = await confirmDialog({
-            title: `Revogar ${p.label}?`,
-            message: 'Ela não poderá votar nos próximos cargos. Votos já registrados permanecem. Esta ação não pode ser desfeita.',
-            confirmLabel: 'Revogar',
-            danger: true,
-          });
-          if (ok) action(rv, () => api(mpath(`/participants/${p.id}/revoke`), { method: 'POST' }), 'Credencial revogada.');
-        });
-        actions.append(el('span', { class: 'row end' }, re, rv));
-      }
-      return el('tr', {}, el('td', {}, el('strong', {}, p.label)), el('td', {}, credentialBadge(p)), el('td', {}, voted), actions);
-    }),
-  );
-}
-
-function cardNode(c) {
-  const brand = el('div', { class: 'cc-brand' }, icon('check'), 'Nomeia');
-  return el(
-    'div',
-    { class: 'cred-card' },
-    brand,
-    el('div', { class: 'cc-meeting' }, state?.name || ''),
-    el('div', { class: 'cc-label' }, c.label),
-    el('img', { src: c.qr, alt: `QR Code da ${c.label}`, width: '150', height: '150' }),
-    el('div', { class: 'code' }, c.code),
-    el('div', { class: 'cc-hint' }, 'Leia o QR ou digite o código em', el('br'), new URL(c.link).origin + '/votar.html'),
-    el('div', { class: 'cc-hint' }, 'Pessoal e intransferível · 1 voto por cargo'),
-  );
-}
-
-function showIssued(cards) {
-  $('#issued').hidden = false;
-  $('#issued-cards').replaceChildren(...cards.map(cardNode));
-  $('#print-area').replaceChildren(...cards.map(cardNode));
-  $('#issued').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
 }
 
 function openHistory(id) {
@@ -503,7 +416,7 @@ function renderHistory() {
               el('td', { class: 'muted' }, fmtDate(o.closedAt)),
               el('td', { class: 'num' }, String(o.result.candidates.length)),
               el('td', { class: 'num' }, String(o.result.castVotes)),
-              el('td', { class: 'num' }, fmtPct(o.result.turnoutPctExpected)),
+              el('td', { class: 'num' }, String(o.result.presentParticipants ?? o.result.expectedParticipants ?? '—')),
               el('td', { class: 'num' }, btn),
             );
           })
@@ -617,10 +530,10 @@ $('#btn-close').addEventListener('click', async (ev) => {
   const btn = ev.currentTarget;
   const o = currentOffice();
   if (!o) return;
-  const missing = o.live ? o.live.notVotedCredentials : 0;
+  const votes = o.live ? o.live.castVotes : 0;
   const ok = await confirmDialog({
     title: 'Encerrar votação?',
-    message: `${missing ? `Ainda há ${plural(missing, 'credencial', 'credenciais')} sem voto. ` : ''}Novos votos serão recusados e o resultado de "${o.title}" ficará selado e imutável.`,
+    message: `${plural(votes, 'voto recebido', 'votos recebidos')} até agora. Novos votos serão recusados e o resultado de "${o.title}" ficará selado e imutável.`,
     confirmLabel: 'Encerrar votação',
     danger: true,
   });
@@ -651,7 +564,7 @@ $('#btn-next').addEventListener('click', () => {
   $('#o-title').focus();
 });
 
-// ---------------- Reunião: edição, credenciais, backup ----------------
+// ---------------- Reunião: edição e backup ----------------
 
 $('#edit-meeting-form').addEventListener('submit', (ev) => {
   ev.preventDefault();
@@ -660,44 +573,6 @@ $('#edit-meeting-form').addEventListener('submit', (ev) => {
     () => api(mpath(), { method: 'PATCH', body: { name: $('#e-name').value, expectedParticipants: Number($('#e-expected').value) } }),
     'Reunião atualizada.',
   );
-});
-
-$('#cred-form').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const r = await action(ev.submitter, () =>
-    api(mpath('/credentials'), {
-      method: 'POST',
-      body: { count: Number($('#cred-count').value), labelPrefix: $('#cred-prefix').value || 'Credencial' },
-    }),
-  );
-  if (r) {
-    toast(`${plural(r.issued.length, 'credencial emitida', 'credenciais emitidas')}. Imprima os cartões agora.`);
-    showIssued(r.issued);
-  }
-});
-
-$('#print-cards').addEventListener('click', () => {
-  document.body.classList.add('printing');
-  $('#print-area').hidden = false;
-  window.print();
-});
-
-window.addEventListener('afterprint', () => {
-  document.body.classList.remove('printing');
-  $('#print-area').hidden = true;
-});
-
-$('#hide-issued').addEventListener('click', async () => {
-  const ok = await confirmDialog({
-    title: 'Ocultar cartões?',
-    message: 'Os códigos não poderão ser exibidos novamente. Para recuperar um cartão será preciso reemiti-lo.',
-    confirmLabel: 'Ocultar',
-    danger: true,
-  });
-  if (!ok) return;
-  $('#issued').hidden = true;
-  $('#issued-cards').replaceChildren();
-  $('#print-area').replaceChildren();
 });
 
 $('#btn-backup').addEventListener('click', async (ev) => {
@@ -710,7 +585,7 @@ $('#btn-archive').addEventListener('click', async (ev) => {
   const unpublished = state?.offices.filter((o) => o.status === 'closed' && !o.resultsPublished).length || 0;
   const ok = await confirmDialog({
     title: 'Encerrar reunião?',
-    message: `A reunião ficará somente para leitura e não aceitará novos cargos nem credenciais.${
+    message: `A reunião ficará somente para leitura e não aceitará novos cargos nem votos.${
       unpublished ? ` Atenção: ${plural(unpublished, 'cargo tem', 'cargos têm')} resultado não publicado.` : ''
     } Esta ação não pode ser desfeita.`,
     confirmLabel: 'Encerrar reunião',
@@ -748,4 +623,4 @@ async function boot() {
   else showDashboard();
 }
 
-boot();
+if (!isRemoteServer) boot();

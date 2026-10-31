@@ -3,17 +3,19 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const WebSocket = require('ws');
 const { createApp } = require('../src/app');
 
 const SECRET = 'segredo-de-teste-0123456789';
-const NO_LIMITS = Object.fromEntries(
-  ['global', 'login', 'vote', 'credCheck', 'credFail', 'admin', 'wsConnect'].map((k) => [k, { limit: 1e9, windowMs: 60_000 }]),
-);
+const NO_LIMITS = Object.fromEntries(['global', 'login', 'admin', 'wsConnect'].map((k) => [k, { limit: 1e9, windowMs: 60_000 }]));
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'nomeia-test-'));
 }
+
+/** Identificador de uma confirmação de voto (como o navegador gera). */
+const rid = () => crypto.randomBytes(16).toString('hex');
 
 async function startServer({ dataDir = tmpDir(), rateLimits = NO_LIMITS, log, ...rest } = {}) {
   const app = createApp({ dataDir, adminSecret: SECRET, port: 0, host: '127.0.0.1', quiet: true, rateLimits, log, ...rest });
@@ -28,11 +30,10 @@ class Client {
     this.cookie = null;
   }
 
-  async req(method, p, body, { bearer, cookie = this.cookie, headers = {}, raw = false } = {}) {
+  async req(method, p, body, { cookie = this.cookie, headers = {}, raw = false } = {}) {
     const h = { ...headers };
     if (method !== 'GET' && !('X-Nomeia' in h) && !('x-nomeia' in h)) h['X-Nomeia'] = '1';
     if (body !== undefined) h['Content-Type'] = 'application/json';
-    if (bearer) h.Authorization = `Bearer ${bearer}`;
     if (cookie) h.Cookie = cookie;
     const res = await fetch(this.base + p, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) });
     if (raw) return res;
@@ -56,31 +57,23 @@ class Client {
     return this.req(method, `/api/admin/meetings/${meetingId}${suffix}`, body);
   }
 
-  vote(meetingId, credential, officeId, choice) {
-    return this.req('POST', `/api/meetings/${meetingId}/votes`, { officeId, choice }, { bearer: credential, cookie: null });
+  /** Voto público: sem cookie, sem credencial. Um requestId por confirmação. */
+  vote(meetingId, officeId, choice, requestId = rid(), headers = {}) {
+    return this.req('POST', `/api/meetings/${meetingId}/votes`, { officeId, choice, requestId }, { cookie: null, headers });
   }
 }
 
-/** Cria reunião + cargo em discussão + candidatos + credenciais. */
-async function setupMeeting(client, { expected = 10, candidates = ['Ana', 'Bruno'], creds = 3, title = 'Presidente' } = {}) {
+/** Cria reunião + cargo em discussão + candidatos. */
+async function setupMeeting(client, { expected = 10, candidates = ['Ana', 'Bruno'], title = 'Presidente' } = {}) {
   const m = await client.req('POST', '/api/admin/meetings', { name: 'Assembleia de teste', expectedParticipants: expected });
   if (m.status !== 201) throw new Error(`create meeting ${m.status} ${JSON.stringify(m.body)}`);
   const meetingId = m.body.id;
   const o = await client.admin('POST', meetingId, '/offices', { title });
   const officeId = o.body.officeId;
   for (const name of candidates) await client.admin('POST', meetingId, `/offices/${officeId}/candidates`, { name });
-  let cards = [];
-  if (creds) cards = (await client.admin('POST', meetingId, '/credentials', { count: creds })).body.issued;
   const snap = (await client.admin('GET', meetingId, '')).body;
   const cands = snap.offices.find((x) => x.id === officeId).candidates;
-  return {
-    meetingId,
-    officeId,
-    cands,
-    cards,
-    tokens: cards.map((c) => c.link.split('#t=')[1]),
-    codes: cards.map((c) => c.code),
-  };
+  return { meetingId, officeId, cands };
 }
 
 async function newOffice(client, meetingId, title, candidates) {
@@ -92,9 +85,13 @@ async function newOffice(client, meetingId, title, candidates) {
 }
 
 /** Cliente WebSocket que guarda as mensagens e permite aguardar uma condição. */
-function wsClient(base, meetingId, { role, cookie } = {}) {
+function wsClient(base, meetingId, { role, cookie, origin } = {}) {
   const url = `${base.replace('http', 'ws')}/ws?meeting=${meetingId}${role === 'admin' ? '&role=admin' : ''}`;
-  const ws = new WebSocket(url, { headers: cookie ? { Cookie: cookie } : {} });
+  const headers = {};
+  if (cookie) headers.Cookie = cookie;
+  if (origin) headers.Origin = origin;
+  const ws = new WebSocket(url, { headers });
+  ws.on('error', () => {});
   const messages = [];
   const waiters = [];
   let closeInfo = null;
@@ -107,12 +104,12 @@ function wsClient(base, meetingId, { role, cookie } = {}) {
     closeInfo = { code, reason: reason.toString() };
     for (const w of [...waiters]) if (w.onClose) w.onClose(closeInfo);
   });
-  const api = {
+  return {
     ws,
     messages,
     opened: new Promise((resolve, reject) => {
       ws.once('open', resolve);
-      ws.once('error', reject);
+      ws.once('unexpected-response', (_req, res) => reject(new Error(`HTTP ${res.statusCode}`)));
     }),
     waitFor(pred, ms = 3000) {
       const found = messages.find(pred);
@@ -144,7 +141,6 @@ function wsClient(base, meetingId, { role, cookie } = {}) {
       ws.terminate();
     },
   };
-  return api;
 }
 
-module.exports = { SECRET, NO_LIMITS, tmpDir, startServer, Client, setupMeeting, newOffice, wsClient };
+module.exports = { SECRET, NO_LIMITS, tmpDir, rid, startServer, Client, setupMeeting, newOffice, wsClient };

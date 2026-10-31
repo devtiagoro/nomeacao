@@ -61,10 +61,22 @@ function publicBase(req, cfg) {
   return `${proto}://${host}`;
 }
 
-function isAllowedOrigin(origin, req, cfg) {
+/** Origem do próprio servidor (Host da requisição ou PUBLIC_ORIGIN). */
+function isOwnOrigin(origin, req, cfg) {
   if (!origin) return false;
   const own = `${requestProto(req, cfg)}://${safeHost(req, cfg)}`;
-  return origin === own || origin === cfg.publicOrigin || cfg.allowedOrigins.includes(origin);
+  return origin === own || (Boolean(cfg.publicOrigin) && origin === cfg.publicOrigin);
+}
+
+/** Própria origem ou origem externa autorizada (ALLOWED_ORIGINS / PUBLIC_APP_URL). */
+function isAllowedOrigin(origin, req, cfg) {
+  if (!origin) return false;
+  return isOwnOrigin(origin, req, cfg) || cfg.allowedOrigins.includes(origin);
+}
+
+/** Base pública do front-end (termina com "/"): PUBLIC_APP_URL ou o próprio servidor. */
+function appBase(req, cfg) {
+  return cfg.publicAppUrl || `${publicBase(req, cfg)}/`;
 }
 
 function securityHeaders(req, res, cfg) {
@@ -213,6 +225,8 @@ module.exports = {
   clientIp,
   publicBase,
   isAllowedOrigin,
+  isOwnOrigin,
+  appBase,
   securityHeaders,
   sendJson,
   sendError,
