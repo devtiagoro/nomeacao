@@ -1,83 +1,22 @@
-import {
-  el,
-  $,
-  setText,
-  announce,
-  storage,
-  isMeetingId,
-  setupOfflineBar,
-  registerServiceWorker,
-  statusChip,
-  renderResults,
-  STATUS_LABEL,
-  plural,
-  icon,
-  emptyState,
-  confirmDialog,
-} from './common.js';
-import { configured, castVote, watchMeeting, watchConnection } from './db.js';
+import { el, $, setText, announce, statusChip, renderResults, STATUS_LABEL, plural, icon, emptyState } from './common.js';
+import { configured, castBallot, watchMeeting, watchConnection, watchCurrent } from './db.js';
+import { ABSTAIN, ballotChoices, newRequestId } from './domain.js';
 
-registerServiceWorker();
-setupOfflineBar();
+// Votação pública: sem login, sem código. Cada "Confirmar voto" registra uma cédula.
+// A tela segue a reunião em andamento: próximo cargo e nova reunião aparecem sozinhos.
 
-// Votação pública: sem login, sem credencial. Cada confirmação registra um voto.
-const ABSTAIN = 'abstain';
-let meetingId = new URLSearchParams(location.search).get('m');
-
+let meetingId = null;
+let stopMeeting = null;
 let state = null;
-let selection = null;
+let currentOfficeId = null;
+let selection = new Set();
 let sending = false;
 let flash = null;
-let currentOfficeId = null;
-let viewKey = '';
-let pendingOffice = null;
-let pendingRequestId = null; // id da confirmação em andamento (reaproveitado só em reenvio após falha)
-let lastResultsKey = '';
-// Confirmação recém-registrada nesta tela (somente memória; não limita novos votos).
-let justVoted = null;
-const dialog = $('#confirm-dialog');
-
-function show(view) {
-  for (const id of ['view-loading', 'view-error', 'view-main']) $(`#${id}`).hidden = id !== view;
-}
-
-function fatal(text) {
-  setText('#error-text', text);
-  show('view-error');
-}
-
-/** Identificador aleatório de uma confirmação (funciona também fora de HTTPS). */
-function newRequestId() {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-// Confirmações já enviadas ao menos uma vez (memória da tela; não limita novos votos).
+let justVoted = null; // cargo em que esta tela acabou de votar (somente memória; não limita novos votos)
+let pendingRequestId = null; // reaproveitado apenas para reenviar após falha de rede
 const attempted = new Set();
-
-function bindMeeting(id) {
-  meetingId = id;
-  history.replaceState(null, '', `votar.html?m=${encodeURIComponent(id)}`);
-  // Manifesto vinculado à reunião (quando servido pelo Node): a PWA instalada abre nesta tela.
-  $('link[rel="manifest"]').href = `manifest.webmanifest?m=${encodeURIComponent(id)}`;
-  storage.rememberMeeting(id);
-}
-
-function announceEvent(type, s) {
-  const o = s.currentOffice;
-  const msgs = {
-    vote_opened: o && `Votação aberta para ${o.title}.`,
-    next_office: o && `Novo cargo em discussão: ${o.title}.`,
-    candidates_updated: 'Lista de nomes atualizada.',
-    vote_closed: 'Votação encerrada.',
-    results_published: 'Resultados publicados.',
-    meeting_closed: 'Reunião encerrada.',
-  };
-  if (msgs[type]) announce(msgs[type], { assertive: type === 'vote_opened' });
-}
-
-// ---------------- Componentes de tela ----------------
+let viewKey = '';
+let resultsKey = '';
 
 const FLASH_ICON = { error: 'alert', warn: 'alert', info: 'info', success: 'check-circle' };
 
@@ -85,36 +24,61 @@ function banner(kind, text) {
   return el('p', { class: `banner ${kind}` }, icon(FLASH_ICON[kind] || 'info'), el('span', {}, text));
 }
 
-/** Nomes ao vivo, sem interação (durante a discussão). */
+function waiting(text) {
+  return el('p', { class: 'waiting' }, el('span', { class: 'waiting-dot', 'aria-hidden': 'true' }), text);
+}
+
+function officeHeader(o) {
+  const type = o.voteType === 'multiple' ? `Escolha até ${o.maxChoices} nomes` : 'Escolha um nome';
+  return el(
+    'header',
+    { class: 'office-hero' },
+    el('div', { class: 'office-hero-top' }, el('span', { class: 'eyebrow' }, type), el('span', { class: `chip ${o.status}` }, STATUS_LABEL[o.status])),
+    el('h2', {}, o.title),
+  );
+}
+
+/** Nomes ao vivo, sem interação (cargo apresentado, votação ainda fechada). */
 function candidateList(o) {
-  if (!o.candidates.length) {
-    return emptyState({ iconName: 'users', title: 'Nenhum nome indicado ainda', text: 'Os nomes aparecem aqui assim que a mesa os adicionar.' });
-  }
+  if (!o.candidates.length) return emptyState({ iconName: 'users', title: 'Nenhum nome proposto ainda', text: 'Os nomes aparecem aqui assim que forem adicionados.' });
   return el(
     'ul',
-    { class: 'choice-list candidate-list', 'aria-label': 'Nomes indicados' },
+    { class: 'choice-list', 'aria-label': 'Nomes propostos' },
     o.candidates.map((c, i) => el('li', { class: 'choice-static' }, el('span', { class: 'choice-index', 'aria-hidden': 'true' }, String(i + 1)), el('span', {}, c.name))),
   );
 }
 
-function lockedActionBar(text, hint) {
-  const btn = el('button', { class: 'btn btn-primary btn-xl btn-block', type: 'button', disabled: true, 'aria-disabled': 'true' }, icon('lock'), text);
-  return el('div', { class: 'action-bar' }, btn, hint ? el('p', { class: 'action-hint' }, hint) : null);
-}
-
 function voteForm(o) {
-  const name = `vote-${o.id}`;
-  const submit = el('button', { class: 'btn btn-primary btn-xl btn-block', type: 'submit' }, 'Confirmar meu voto');
-  const hint = el('p', { class: 'action-hint', id: 'vote-hint' }, selection ? 'Você revisará sua escolha antes de registrar.' : 'Toque em uma opção para continuar.');
-  submit.disabled = !selection;
+  const multiple = o.voteType === 'multiple';
+  const submit = el('button', { class: 'btn btn-primary btn-xl btn-block', type: 'submit' }, 'Confirmar voto');
+  const hint = el('p', { class: 'action-hint', id: 'vote-hint' });
+  const inputs = [];
+
+  const sync = () => {
+    const names = [...selection].filter((v) => v !== ABSTAIN).length;
+    submit.disabled = !selection.size;
+    for (const i of inputs) i.checked = selection.has(i.value);
+    if (multiple) for (const i of inputs) i.disabled = i.value !== ABSTAIN && !i.checked && names >= o.maxChoices;
+    hint.textContent = !selection.size
+      ? 'Toque em uma opção.'
+      : multiple && !selection.has(ABSTAIN)
+        ? `${names} de até ${o.maxChoices} selecionados.`
+        : 'Toque em "Confirmar voto" para registrar.';
+  };
+
   const option = (value, label, extraClass = '', sub = '') => {
     const id = `opt-${value}`;
-    const input = el('input', { type: 'radio', name, id, value });
-    input.checked = selection === value;
+    const input = el('input', { type: multiple ? 'checkbox' : 'radio', name: 'vote', id, value });
+    inputs.push(input);
     input.addEventListener('change', () => {
-      selection = value;
-      submit.disabled = false;
-      hint.textContent = 'Você revisará sua escolha antes de registrar.';
+      if (!multiple) selection = new Set([value]);
+      else if (!input.checked) selection.delete(value);
+      else if (value === ABSTAIN) selection = new Set([ABSTAIN]);
+      else {
+        selection.delete(ABSTAIN);
+        selection.add(value);
+      }
+      sync();
     });
     return el(
       'div',
@@ -128,13 +92,14 @@ function voteForm(o) {
       ),
     );
   };
+
   const form = el(
     'form',
     { class: 'vote-form', novalidate: true, 'aria-describedby': 'vote-hint' },
     el(
       'fieldset',
       { class: 'options' },
-      el('legend', {}, 'Escolha uma opção'),
+      el('legend', {}, multiple ? `Escolha até ${o.maxChoices} nomes` : 'Escolha um nome'),
       o.candidates.map((c) => option(c.id, c.name)),
       el('div', { class: 'options-divider', 'aria-hidden': 'true' }, 'ou'),
       option(ABSTAIN, 'Abstenção', 'abstain', 'Registrar o voto sem escolher um nome'),
@@ -143,135 +108,70 @@ function voteForm(o) {
   );
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
-    if (selection) openConfirm(o);
+    if (selection.size) submitVote(o, submit);
   });
+  sync();
   return form;
 }
 
-function chosenName(o) {
-  return selection === ABSTAIN ? 'Abstenção' : o.candidates.find((c) => c.id === selection)?.name || '—';
-}
-
-/** Modal de confirmação com o nome escolhido antes de registrar. */
-async function openConfirm(o) {
-  pendingOffice = o;
-  // Nova confirmação = novo voto. Só um reenvio após falha reaproveita o id anterior.
-  if (!pendingRequestId) pendingRequestId = newRequestId();
-  if (typeof dialog.showModal !== 'function') {
-    const ok = await confirmDialog({ title: 'Confirmar voto', message: `Você escolheu: ${chosenName(o)}.` });
-    if (ok) submitVote(o);
-    return;
-  }
-  setText('#confirm-choice', chosenName(o));
-  setConfirmBusy(false);
-  dialog.showModal();
-  $('#confirm-btn').focus();
-}
-
-function setConfirmBusy(busy) {
-  const ok = $('#confirm-btn');
-  ok.disabled = busy;
-  $('#confirm-cancel').disabled = busy;
-  if (busy) ok.setAttribute('aria-busy', 'true');
-  else ok.removeAttribute('aria-busy');
-  ok.textContent = busy ? 'Registrando…' : 'Confirmar voto';
-}
-
-function closeConfirm() {
-  if (dialog.open) dialog.close();
-  pendingOffice = null;
-}
-
-$('#confirm-cancel').addEventListener('click', () => {
-  if (!sending) {
-    pendingRequestId = null;
-    closeConfirm();
-  }
-});
-// Duplo clique: o botão é desativado no primeiro clique e "sending" ignora o segundo.
-$('#confirm-btn').addEventListener('click', () => {
-  if (pendingOffice) submitVote(pendingOffice);
-});
-dialog.addEventListener('cancel', (e) => {
-  if (sending) e.preventDefault();
-  else {
-    pendingOffice = null;
-    pendingRequestId = null;
-  }
-});
-
-async function submitVote(o) {
+async function submitVote(o, button) {
   if (sending) return;
+  let choices;
+  try {
+    choices = ballotChoices(o, [...selection]);
+  } catch (e) {
+    flash = { kind: 'error', text: e.message };
+    return render(true);
+  }
   sending = true;
-  setConfirmBusy(true);
-  const requestId = pendingRequestId || newRequestId();
-  pendingRequestId = requestId;
-  let keepChoice = false;
+  button.disabled = true;
+  button.textContent = 'Registrando…';
+  pendingRequestId ??= newRequestId();
+  const requestId = pendingRequestId;
   try {
     const retry = attempted.has(requestId);
     attempted.add(requestId);
     try {
-      await castVote(meetingId, o.id, selection, requestId);
+      await castBallot(meetingId, o.id, choices, requestId);
     } catch (e) {
-      // Reenvio recusado com a votação ainda aberta: o recibo já existia, ou seja,
-      // a tentativa anterior foi registrada (falhou só a resposta). Não conta de novo.
+      // Reenvio recusado com a votação ainda aberta: a tentativa anterior já tinha sido
+      // registrada (falhou só a resposta). Não conta de novo.
       const stillOpen = state?.currentOffice?.id === o.id && state.currentOffice.status === 'voting_open';
       if (!(e.code === 'rejected' && retry && stillOpen)) throw e;
     }
-    justVoted = { officeId: o.id, name: chosenName(o) };
+    justVoted = o.id;
     flash = null;
     pendingRequestId = null;
-    announce('Seu voto foi registrado.', { assertive: true });
+    selection = new Set();
+    announce('Voto registrado.', { assertive: true });
   } catch (e) {
-    if (e.code === 'network_error') {
-      // Mantém escolha e requestId: ao tentar de novo, o servidor reconhece se já tinha registrado.
-      keepChoice = true;
-      flash = { kind: 'error', text: `${e.message} Toque em "Confirmar meu voto" para tentar novamente.` };
-    } else {
+    // Falha de rede: mantém a escolha e o identificador; ao tentar de novo o banco reconhece se já registrou.
+    if (e.code !== 'network_error') {
       pendingRequestId = null;
-      flash = { kind: 'error', text: e.message };
+      selection = new Set();
     }
+    flash = { kind: 'error', text: e.code === 'network_error' ? `${e.message} Toque em "Confirmar voto" novamente.` : e.message };
     announce(flash.text, { assertive: true });
   } finally {
     sending = false;
-    setConfirmBusy(false);
-    closeConfirm();
-    if (!keepChoice) selection = null;
-    viewKey = '';
-    render();
+    render(true);
     if (justVoted) $('#office-area .voted')?.focus();
   }
-}
-
-function officeHeader(o) {
-  return el(
-    'header',
-    { class: 'office-hero' },
-    el('div', { class: 'office-hero-top' }, el('span', { class: 'eyebrow' }, 'Cargo atual'), el('span', { class: `chip ${o.status}` }, STATUS_LABEL[o.status] || o.status)),
-    el('h2', {}, o.title),
-    o.description ? el('p', {}, o.description) : null,
-  );
-}
-
-function waitingNext() {
-  return el('p', { class: 'waiting' }, el('span', { class: 'waiting-dot', 'aria-hidden': 'true' }), 'Aguardando o próximo cargo');
 }
 
 function votedPanel() {
   const again = el('button', { class: 'btn btn-secondary btn-lg', type: 'button' }, icon('refresh'), 'Votar novamente');
   again.addEventListener('click', () => {
     justVoted = null;
-    viewKey = '';
-    render();
-    $('#office-area input[type=radio]')?.focus();
+    render(true);
+    $('#office-area input')?.focus();
   });
   return el(
     'div',
     { class: 'voted', tabindex: '-1' },
     el('div', { class: 'voted-icon' }, icon('check')),
-    el('h3', {}, 'Seu voto foi registrado'),
-    el('p', { class: 'muted small' }, `Opção: ${justVoted.name}`),
-    waitingNext(),
+    el('h3', {}, 'Voto registrado'),
+    waiting('Aguarde o encerramento da votação'),
     again,
   );
 }
@@ -279,128 +179,87 @@ function votedPanel() {
 function buildOffice(o) {
   const area = [officeHeader(o)];
   if (o.status === 'discussing') {
-    area.push(banner('info', 'Em discussão. A votação será liberada pela mesa; esta tela atualiza sozinha.'));
-    area.push(candidateList(o));
-    area.push(lockedActionBar('Votação ainda não aberta', 'Você poderá votar assim que a mesa abrir a votação.'));
+    area.push(candidateList(o), waiting('A votação ainda não foi aberta'));
   } else if (o.status === 'voting_open') {
-    area.push(justVoted?.officeId === o.id ? votedPanel() : voteForm(o));
-  } else if (o.status === 'closed') {
-    area.push(banner('info', 'Votação encerrada.'));
-    area.push(el('div', { id: 'results-slot' }));
-    area.push(waitingNext());
+    area.push(justVoted === o.id ? votedPanel() : voteForm(o));
+    if (o.liveResults) area.push(el('div', { id: 'results-slot' }));
+  } else {
+    area.push(el('div', { id: 'results-slot' }), waiting('Aguardando o próximo cargo'));
   }
-  if (o.status === 'voting_open' && o.resultsMode === 'live') area.push(el('div', { id: 'results-slot' }));
   return area;
 }
 
-function buildArchived() {
-  const items = state.history.map((h) =>
-    el(
-      'section',
-      { class: 'card' },
-      el('h3', { class: 'mb-4' }, h.title),
-      h.results ? renderResults(h.results) : el('p', { class: 'muted small' }, 'Resultado não divulgado.'),
-    ),
-  );
-  return [emptyState({ iconName: 'check-circle', title: 'Reunião encerrada', text: 'Obrigado pela participação.' }), ...items];
-}
-
-function render() {
+function render(force = false) {
   if (!state) return;
-  show('view-main');
   setText('#meeting-name', state.name);
   document.title = `${state.name} — Nomeia`;
   const o = state.currentOffice;
 
   if (o?.id !== currentOfficeId) {
     currentOfficeId = o?.id ?? null;
-    selection = null;
+    selection = new Set();
     pendingRequestId = null;
     justVoted = null;
     flash = null;
   }
 
-  // Votação mudou enquanto o modal estava aberto (encerrada ou novo cargo).
-  if (dialog.open && !sending && (!o || o.id !== pendingOffice?.id || o.status !== 'voting_open')) {
-    closeConfirm();
-    pendingRequestId = null;
-    flash = { kind: 'warn', text: 'A votação mudou antes da confirmação. Seu voto não foi registrado.' };
-  }
-
-  const key = JSON.stringify([
-    state.status,
-    o?.id,
-    o?.status,
-    o?.title,
-    o?.description,
-    o?.candidates,
-    o?.resultsMode,
-    justVoted,
-    sending,
-    flash,
-    state.status === 'archived' ? state.history : null,
-  ]);
-  if (key !== viewKey) {
+  // Durante o voto a tela só é reconstruída quando algo relevante muda (preserva a seleção).
+  const key = JSON.stringify([o?.id, o?.status, o?.title, o?.candidates, o?.voteType, o?.maxChoices, o?.liveResults, justVoted, flash]);
+  if (force || key !== viewKey) {
     viewKey = key;
-    const nodes =
-      state.status === 'archived'
-        ? buildArchived()
-        : o
-          ? buildOffice(o)
-          : [emptyState({ iconName: 'clock', title: 'Aguardando o primeiro cargo', text: 'Assim que a mesa apresentar o cargo, os nomes aparecem aqui automaticamente.' })];
-    $('#office-area').replaceChildren(...nodes);
+    resultsKey = '';
+    $('#office-area').replaceChildren(...(o ? buildOffice(o) : [emptyState({ iconName: 'clock', title: 'Aguardando o próximo cargo', text: 'Esta tela atualiza sozinha.' })]));
     $('#flash').replaceChildren(flash ? banner(flash.kind, flash.text) : '');
-    lastResultsKey = '';
   }
 
-  // Partes que mudam a cada voto são atualizadas sem reconstruir o formulário.
   const slot = $('#results-slot');
   if (slot) {
-    const rk = JSON.stringify(o?.results);
-    if (rk !== lastResultsKey) {
-      const first = !lastResultsKey;
-      lastResultsKey = rk;
+    const rk = JSON.stringify(o.result);
+    if (rk !== resultsKey) {
+      const first = !resultsKey;
+      resultsKey = rk;
       slot.replaceChildren(
-        o?.results
-          ? el('section', { class: 'card' }, el('h3', { class: 'mb-4' }, o.status === 'closed' ? 'Resultado' : 'Apuração parcial'), renderResults(o.results, { animate: first }))
-          : banner('info', 'O resultado será divulgado pela mesa.'),
+        o.result
+          ? el('section', { class: 'card' }, el('h3', { class: 'mb-4' }, o.status === 'closed' ? 'Resultado' : 'Resultado parcial'), renderResults(o.result, { animate: first }))
+          : waiting('Apurando…'),
       );
     }
   }
   const turnout = $('#turnout');
-  if (o && o.status === 'voting_open') {
-    turnout.replaceChildren(icon('ballot'), el('span', {}, `${plural(o.turnout.votes, 'voto recebido', 'votos recebidos')} até agora`));
-  } else turnout.replaceChildren();
+  if (o?.status === 'voting_open') turnout.replaceChildren(icon('ballot'), el('span', {}, `${plural(o.ballots, 'voto registrado', 'votos registrados')}`));
+  else turnout.replaceChildren();
 }
 
-async function startLive() {
-  if (!configured) return fatal('Esta publicação ainda não está ligada ao Firebase (js/firebase-config.js).');
-  try {
-    await watchConnection((st) => statusChip($('#conn'), st));
-    await watchMeeting(
-      meetingId,
-      {},
-      (s, type) => {
-        state = s;
-        announceEvent(type, s);
-        render();
-      },
-      (reason) => fatal(reason === 'not_found' ? 'Reunião não encontrada. Confira o link ou o QR Code.' : 'Acesso negado.'),
-    );
-  } catch (e) {
-    fatal(e.message);
-  }
+function noMeeting() {
+  state = null;
+  setText('#meeting-name', 'Nomeia');
+  $('#office-area').replaceChildren(emptyState({ iconName: 'clock', title: 'Aguardando o início da reunião', text: 'Esta tela atualiza sozinha.' }));
+  $('#turnout').replaceChildren();
 }
 
-function init() {
-  if (!isMeetingId(meetingId)) meetingId = storage.lastMeeting();
-  if (!isMeetingId(meetingId)) {
-    // Sem reunião escolhida: a página inicial lista as reuniões disponíveis.
-    location.replace('index.html');
-    return;
-  }
-  bindMeeting(meetingId);
-  startLive();
+function unavailable() {
+  setText('#meeting-name', 'Nomeia');
+  $('#office-area').replaceChildren(emptyState({ iconName: 'wifi-off', title: 'Votação indisponível no momento', text: 'Tente novamente em instantes.' }));
 }
 
-init();
+async function follow(id) {
+  stopMeeting?.();
+  stopMeeting = null;
+  meetingId = id;
+  viewKey = '';
+  if (!id) return noMeeting();
+  const stop = await watchMeeting(id, {}, (s) => {
+    if (meetingId !== id) return;
+    state = s;
+    render();
+  }, noMeeting);
+  if (meetingId === id) stopMeeting = stop;
+  else stop();
+}
+
+if (!configured) unavailable();
+else {
+  watchConnection((st) => statusChip($('#conn'), st))
+    .then(() => watchCurrent(follow))
+    .catch(unavailable);
+}

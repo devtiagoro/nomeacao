@@ -7,34 +7,28 @@
     <meta name="robots" content="noindex" />
     <meta name="theme-color" content="#0f4c5c" />
     <meta name="color-scheme" content="light dark" />
-    <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="css/style.css" />
     <link rel="stylesheet" href="css/admin.css" />
     <script type="module" src="js/admin.js"></script>
   </head>
   <body class="page-admin">
-    <a class="skip-link" href="#main">Pular para o conteúdo</a>
     <header class="app-header">
       <div class="admin-header-left">
-        <a class="brand" href="admin.html" aria-label="Nomeia — todas as reuniões">
+        <a class="brand" href="index.html" aria-label="Nomeia — início">
           <span class="brand-mark"><span data-icon="check"></span></span><span class="brand-text">Nomeia</span>
         </a>
         <div id="hdr-meeting" class="hdr-meeting" hidden>
           <span class="hdr-sep" aria-hidden="true"></span>
           <div class="hdr-meeting-text">
             <h1 id="mt-name" class="hdr-title"></h1>
-            <span id="mt-status" class="chip"></span>
           </div>
         </div>
       </div>
-      <nav class="admin-header-right" aria-label="Navegação da reunião">
+      <nav class="admin-header-right" aria-label="Navegação">
         <span id="conn" class="chip connecting" role="status" hidden>Conectando…</span>
-        <a id="hdr-presentation" class="btn btn-secondary btn-sm" target="_blank" rel="noopener" hidden title="Abrir apresentação">
+        <a id="hdr-presentation" class="btn btn-secondary btn-sm" href="apresentacao.html" target="_blank" rel="noopener" hidden title="Abrir apresentação">
           <span data-icon="monitor"></span><span class="label">Apresentação</span>
-        </a>
-        <a id="hdr-history" class="btn btn-ghost btn-sm" href="#history" hidden title="Histórico de cargos">
-          <span data-icon="history"></span><span class="label">Histórico</span>
         </a>
         <button id="logout" class="btn btn-ghost btn-sm" type="button" hidden title="Sair">
           <span data-icon="logout"></span><span class="label">Sair</span>
@@ -50,7 +44,7 @@
         <div class="card login-card">
           <div class="entry-icon"><span data-icon="shield"></span></div>
           <h1 id="login-title">Administração</h1>
-          <p class="muted small">Acesso restrito à mesa da reunião.</p>
+          <p class="muted small">Acesso restrito a quem conduz a reunião.</p>
           <form id="login-form" class="mt-6">
             <div class="field">
               <label for="email">E-mail</label>
@@ -59,326 +53,194 @@
             <div class="field">
               <label for="secret">Senha</label>
               <input id="secret" type="password" autocomplete="current-password" required maxlength="512" />
-              <p class="hint">Conta da mesa criada no Firebase Authentication e autorizada em /admins.</p>
             </div>
             <button class="btn btn-primary btn-lg btn-block" type="submit">Entrar</button>
           </form>
         </div>
       </section>
 
-      <!-- ===================== DASHBOARD ===================== -->
-      <section id="view-dashboard" class="stack-lg" hidden>
-        <div class="page-head">
-          <div>
-            <h1>Reuniões</h1>
-            <p class="muted">Crie uma reunião ou continue uma existente.</p>
-          </div>
-        </div>
-
+      <!-- ===================== NOVA REUNIÃO / REUNIÕES ANTERIORES ===================== -->
+      <section id="view-setup" class="stack-lg" hidden>
         <div class="dash-grid">
           <section class="card" aria-labelledby="new-meeting-title">
             <div class="card-header">
-              <div>
-                <h2 id="new-meeting-title"><span data-icon="plus"></span>Nova reunião</h2>
-                <p class="card-subtitle">Gera links de participação, apresentação e QR Code.</p>
-              </div>
+              <h2 id="new-meeting-title"><span data-icon="plus"></span>Nova reunião</h2>
             </div>
             <form id="meeting-form">
               <div class="form-row">
                 <div class="field">
                   <label for="m-name">Nome da reunião</label>
-                  <input id="m-name" type="text" required maxlength="120" placeholder="Ex.: Assembleia geral ordinária" />
+                  <input id="m-name" type="text" required maxlength="120" placeholder="Ex.: Assembleia geral" />
                 </div>
                 <div class="field">
-                  <label for="m-expected">Pessoas presentes</label>
-                  <input id="m-expected" type="number" required min="1" max="100000" inputmode="numeric" placeholder="Ex.: 40" />
+                  <label for="m-present">Pessoas presentes</label>
+                  <input id="m-present" type="number" required min="1" max="100000" inputmode="numeric" placeholder="Ex.: 40" />
                 </div>
               </div>
               <div class="form-actions">
                 <button class="btn btn-primary" type="submit">Criar reunião</button>
+                <button id="setup-cancel" class="btn btn-ghost" type="button" hidden>Voltar à reunião atual</button>
               </div>
             </form>
           </section>
 
-          <section class="card" aria-labelledby="import-title">
+          <section class="card" aria-labelledby="list-title">
             <div class="card-header">
-              <div>
-                <h2 id="import-title"><span data-icon="upload"></span>Importar</h2>
-                <p class="card-subtitle">Arquivo JSON exportado pelo Nomeia (inclusive backups da versão anterior com servidor). Nunca sobrescreve reuniões existentes.</p>
-              </div>
+              <h2 id="list-title"><span data-icon="calendar"></span>Reuniões anteriores</h2>
             </div>
-            <form id="import-form">
-              <div class="field">
-                <label for="import-file">Arquivo .json</label>
-                <input id="import-file" type="file" accept="application/json,.json" required />
-              </div>
-              <div class="form-actions">
-                <button class="btn btn-secondary" type="submit">Importar reunião</button>
-              </div>
-            </form>
+            <ul id="meetings-list" class="meeting-rows"></ul>
           </section>
         </div>
-
-        <section class="card" aria-labelledby="list-title">
-          <div class="card-header">
-            <h2 id="list-title"><span data-icon="calendar"></span>Reuniões existentes</h2>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Nome</th>
-                  <th scope="col">Situação</th>
-                  <th scope="col" class="num">Cargos</th>
-                  <th scope="col" class="hide-sm">Criada em</th>
-                  <th scope="col"><span class="sr-only">Ações</span></th>
-                </tr>
-              </thead>
-              <tbody id="meetings-body"></tbody>
-            </table>
-          </div>
-        </section>
       </section>
 
       <!-- ===================== REUNIÃO ===================== -->
-      <section id="view-meeting" hidden aria-labelledby="mt-name">
-        <div id="meeting-skeleton" class="meeting-skeleton" aria-busy="true" aria-label="Carregando a reunião">
-          <div class="sk-kpis">
-            <span class="skeleton sk-kpi"></span><span class="skeleton sk-kpi"></span><span class="skeleton sk-kpi"></span><span class="skeleton sk-kpi"></span>
+      <section id="view-meeting" class="stack-lg" hidden>
+        <section class="kpis" aria-label="Participação">
+          <div class="kpi">
+            <span class="kpi-icon" data-icon="users"></span>
+            <div class="kpi-body">
+              <p class="kpi-label">Pessoas presentes</p>
+              <form id="present-form" class="present-form">
+                <label for="present" class="sr-only">Pessoas presentes</label>
+                <input id="present" class="kpi-input" type="number" min="1" max="100000" inputmode="numeric" required />
+                <button class="btn btn-ghost btn-sm" type="submit">Salvar</button>
+              </form>
+            </div>
           </div>
-          <span class="skeleton sk-panel"></span>
-        </div>
+          <div class="kpi kpi-accent">
+            <span class="kpi-icon" data-icon="ballot"></span>
+            <div class="kpi-body">
+              <p class="kpi-label">Votos registrados</p>
+              <p class="kpi-value" id="s-ballots">—</p>
+              <p class="kpi-hint">cargo atual</p>
+            </div>
+          </div>
+        </section>
 
-        <div id="meeting-content" class="stack-lg" hidden>
-          <p id="mt-archived" class="banner info" hidden>
-            <span data-icon="archive"></span><span>Reunião encerrada: disponível somente para leitura, consulta e exportação.</span>
-          </p>
+        <div class="admin-grid">
+          <!-- Cargo atual -->
+          <section class="card office-card" aria-labelledby="cur-title">
+            <div class="section-head">
+              <h2 id="cur-title" class="eyebrow">Cargo atual</h2>
+            </div>
 
-          <!-- Indicadores: presentes (informado) e votos (contados) são independentes -->
-          <section class="kpis" aria-label="Indicadores do cargo atual">
-            <div class="kpi">
-              <span class="kpi-icon" data-icon="users"></span>
-              <div class="kpi-body">
-                <p class="kpi-label">Pessoas presentes</p>
-                <p class="kpi-value" id="s-expected">—</p>
-                <p class="kpi-hint">informado pela mesa</p>
+            <form id="office-form" class="stack" hidden>
+              <h3>Novo cargo</h3>
+              <div class="field">
+                <label for="o-title">Nome do cargo</label>
+                <input id="o-title" type="text" required maxlength="120" placeholder="Ex.: Presidente" />
               </div>
-            </div>
-            <div class="kpi kpi-accent">
-              <span class="kpi-icon" data-icon="ballot"></span>
-              <div class="kpi-body">
-                <p class="kpi-label">Votos recebidos</p>
-                <p class="kpi-value" id="s-voted">—</p>
-                <p class="kpi-hint">cada confirmação conta um voto</p>
+              <fieldset class="field type-choice">
+                <legend>Tipo de votação</legend>
+                <label><input type="radio" name="o-type" value="single" checked /> Escolha única</label>
+                <label><input type="radio" name="o-type" value="multiple" /> Múltipla escolha</label>
+              </fieldset>
+              <div id="o-max-field" class="field" hidden>
+                <label for="o-max">Máximo de nomes por cédula</label>
+                <input id="o-max" type="number" min="2" max="100" value="2" inputmode="numeric" />
               </div>
-            </div>
-            <div class="kpi">
-              <span class="kpi-icon" data-icon="minus"></span>
-              <div class="kpi-body">
-                <p class="kpi-label">Abstenções</p>
-                <p class="kpi-value" id="s-abst">—</p>
+              <div class="form-actions">
+                <button class="btn btn-primary btn-lg" type="submit"><span data-icon="plus"></span>Criar cargo</button>
+                <button id="office-cancel" class="btn btn-ghost btn-lg" type="button">Cancelar</button>
               </div>
-            </div>
-            <div class="kpi">
-              <span class="kpi-icon" data-icon="check-circle"></span>
-              <div class="kpi-body">
-                <p class="kpi-label">Votos válidos</p>
-                <p class="kpi-value" id="s-valid">—</p>
-                <p class="kpi-hint">sem abstenções</p>
+            </form>
+
+            <div id="cur-office" hidden>
+              <div class="office-head">
+                <div class="row">
+                  <span id="co-status" class="chip"></span>
+                  <span id="co-type" class="xsmall muted"></span>
+                </div>
+                <h3 id="co-title" class="office-title"></h3>
               </div>
+
+              <div class="office-section">
+                <div class="section-head">
+                  <h4>Nomes propostos</h4>
+                  <span id="cand-count" class="count-pill">0</span>
+                </div>
+                <ul id="cand-list" class="cand-list" aria-live="polite"></ul>
+                <form id="cand-form" class="input-group">
+                  <label for="cand-name" class="sr-only">Novo nome</label>
+                  <input id="cand-name" type="text" maxlength="120" placeholder="Adicionar nome" required />
+                  <button class="btn btn-secondary" type="submit"><span data-icon="plus"></span>Adicionar</button>
+                </form>
+              </div>
+
+              <label id="live-field" class="live-toggle">
+                <input id="co-live" type="checkbox" />
+                <span>Mostrar resultado parcial ao vivo na apresentação e nos celulares</span>
+              </label>
+
+              <div class="office-actions">
+                <div class="actions-primary">
+                  <button id="btn-present" class="btn btn-primary btn-lg" type="button"><span data-icon="monitor"></span>Apresentar</button>
+                  <button id="btn-open" class="btn btn-accent btn-lg" type="button"><span data-icon="play"></span>Abrir votação</button>
+                  <button id="btn-next" class="btn btn-primary btn-lg" type="button"><span data-icon="arrow-right"></span>Próximo cargo</button>
+                </div>
+                <div class="actions-danger">
+                  <button id="btn-close" class="btn btn-danger btn-lg" type="button"><span data-icon="stop"></span>Encerrar votação</button>
+                </div>
+              </div>
+
+              <div id="co-results" aria-live="polite"></div>
             </div>
           </section>
 
-          <div class="admin-grid">
-            <!-- Cargo em andamento -->
-            <section class="card office-card" aria-labelledby="cur-title">
-              <div class="section-head">
-                <h2 id="cur-title" class="eyebrow">Cargo em andamento</h2>
+          <aside class="admin-aside">
+            <section class="card" aria-labelledby="access-title">
+              <div class="card-header">
+                <h2 id="access-title"><span data-icon="qr"></span>Link da votação</h2>
               </div>
-
-              <div id="cur-empty">
-                <div class="empty">
-                  <div class="empty-icon"><span data-icon="ballot"></span></div>
-                  <p class="empty-title">Pronto para o próximo cargo</p>
-                  <p class="empty-text" id="cur-empty-text">Nenhum cargo em andamento.</p>
+              <div class="access-qr">
+                <img id="mt-qr" alt="QR Code da votação" width="168" height="168" />
+              </div>
+              <div class="access-field">
+                <label for="public-url">Participantes</label>
+                <div class="input-group">
+                  <input id="public-url" type="text" readonly />
+                  <button id="copy-url" class="btn btn-secondary" type="button" aria-label="Copiar link"><span data-icon="copy"></span></button>
                 </div>
               </div>
-
-              <form id="office-form" class="stack" data-mutating hidden>
-                <h3>Novo cargo</h3>
-                <div class="field">
-                  <label for="o-title">Nome do cargo</label>
-                  <input id="o-title" type="text" required maxlength="120" placeholder="Ex.: Presidente" />
-                </div>
-                <div class="field">
-                  <label for="o-desc">Descrição <span class="muted">(opcional)</span></label>
-                  <textarea id="o-desc" maxlength="500" placeholder="Mandato, atribuições ou observações"></textarea>
-                </div>
-                <div class="field">
-                  <label for="o-mode">Resultados por candidato</label>
-                  <select id="o-mode">
-                    <option value="on_publish">Ocultos até a mesa publicar (após encerrar)</option>
-                    <option value="on_close">Publicados automaticamente ao encerrar</option>
-                    <option value="live">Visíveis ao vivo durante a votação</option>
-                  </select>
-                  <p class="hint">A contagem de participação é sempre visível na apresentação.</p>
-                </div>
-                <div class="form-actions">
-                  <button class="btn btn-primary btn-lg" type="submit"><span data-icon="monitor"></span>Criar e apresentar</button>
-                  <button id="office-cancel" class="btn btn-ghost btn-lg" type="button">Cancelar</button>
-                </div>
-              </form>
-
-              <div id="cur-office" hidden>
-                <div class="office-head">
-                  <div class="row">
-                    <span id="co-status" class="chip"></span>
-                    <span id="co-mode-label" class="xsmall muted"></span>
-                  </div>
-                  <h3 id="co-title" class="office-title"></h3>
-                  <p id="co-desc" class="muted"></p>
-                </div>
-
-                <div class="office-section">
-                  <div class="section-head">
-                    <h4>Nomes indicados</h4>
-                    <span id="cand-count" class="count-pill">0</span>
-                  </div>
-                  <ul id="cand-list" class="cand-list" aria-live="polite"></ul>
-                  <form id="cand-form" class="input-group" data-mutating>
-                    <label for="cand-name" class="sr-only">Novo nome</label>
-                    <input id="cand-name" type="text" maxlength="120" placeholder="Adicionar nome indicado" required />
-                    <button class="btn btn-secondary" type="submit"><span data-icon="plus"></span>Adicionar</button>
-                  </form>
-                </div>
-
-                <div class="office-settings field" data-mutating id="mode-field">
-                  <label for="co-mode">Resultados por candidato</label>
-                  <select id="co-mode">
-                    <option value="on_publish">Ocultos até a mesa publicar</option>
-                    <option value="on_close">Publicados ao encerrar</option>
-                    <option value="live">Visíveis ao vivo</option>
-                  </select>
-                </div>
-
-                <div class="office-actions" data-mutating>
-                  <div class="actions-primary">
-                    <button id="btn-open" class="btn btn-accent btn-lg" type="button"><span data-icon="play"></span>Abrir votação</button>
-                    <button id="btn-publish" class="btn btn-primary btn-lg" type="button"><span data-icon="eye"></span>Publicar resultados</button>
-                    <button id="btn-results" class="btn btn-secondary btn-lg" type="button"><span data-icon="chart"></span>Ver resultados</button>
-                    <button id="btn-next" class="btn btn-primary btn-lg" type="button"><span data-icon="arrow-right"></span>Próximo cargo</button>
-                  </div>
-                  <div class="actions-danger">
-                    <p class="hint">Bloqueia novos votos e sela o resultado.</p>
-                    <button id="btn-close" class="btn btn-danger btn-lg" type="button"><span data-icon="stop"></span>Encerrar votação</button>
-                  </div>
-                </div>
-
-                <div id="co-results" aria-live="polite"></div>
-              </div>
+              <p class="hint mt-3">Qualquer pessoa com o link vota, sem cadastro. Os celulares acompanham os próximos cargos sozinhos.</p>
             </section>
 
-            <aside class="admin-aside">
-              <!-- Acesso -->
-              <section class="card" aria-labelledby="access-title">
-                <div class="card-header">
-                  <h2 id="access-title"><span data-icon="qr"></span>Acesso</h2>
-                </div>
-                <div class="access-qr">
-                  <img id="mt-qr" alt="QR Code do link público da reunião" width="168" height="168" />
-                </div>
-                <div class="access-field">
-                  <label for="public-url">Link público (participantes)</label>
-                  <div class="input-group">
-                    <input id="public-url" type="text" readonly />
-                    <button class="btn btn-secondary" type="button" data-copy="#public-url" aria-label="Copiar link público"><span data-icon="copy"></span></button>
-                  </div>
-                </div>
-                <div class="access-field">
-                  <label for="presentation-url">Apresentação (projetor)</label>
-                  <div class="input-group">
-                    <input id="presentation-url" type="text" readonly />
-                    <button class="btn btn-secondary" type="button" data-copy="#presentation-url" aria-label="Copiar link da apresentação"><span data-icon="copy"></span></button>
-                    <a id="presentation-open" class="btn btn-secondary" target="_blank" rel="noopener" aria-label="Abrir apresentação em nova aba"><span data-icon="external"></span></a>
-                  </div>
-                </div>
-                <p class="hint mt-3">Qualquer pessoa com o link ou o QR Code pode votar, sem cadastro.</p>
-                <details class="disclosure" data-mutating>
-                  <summary><span data-icon="sliders"></span>Editar nome e pessoas presentes</summary>
-                  <form id="edit-meeting-form" class="stack">
-                    <div class="field">
-                      <label for="e-name">Nome</label>
-                      <input id="e-name" type="text" required maxlength="120" />
-                    </div>
-                    <div class="field">
-                      <label for="e-expected">Pessoas presentes</label>
-                      <input id="e-expected" type="number" min="1" max="100000" required />
-                    </div>
-                    <button class="btn btn-secondary" type="submit">Salvar alterações</button>
-                  </form>
-                </details>
-              </section>
-
-            </aside>
-          </div>
-
-          <!-- Histórico -->
-          <section id="history" class="card" aria-labelledby="hist-title" tabindex="-1">
-            <div class="card-header">
-              <div>
-                <h2 id="hist-title"><span data-icon="history"></span>Histórico de cargos</h2>
-                <p class="card-subtitle">Resultados encerrados são imutáveis e selados com SHA-256.</p>
+            <section class="card" aria-labelledby="meeting-title">
+              <div class="card-header">
+                <h2 id="meeting-title"><span data-icon="calendar"></span>Reunião</h2>
               </div>
-            </div>
-            <div class="table-wrap">
-              <table class="history-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Cargo</th>
-                    <th scope="col">Data da votação</th>
-                    <th scope="col" class="num">Candidatos</th>
-                    <th scope="col" class="num">Total de votos</th>
-                    <th scope="col" class="num">Presentes</th>
-                    <th scope="col"><span class="sr-only">Ações</span></th>
-                  </tr>
-                </thead>
-                <tbody id="hist-list"></tbody>
-              </table>
-            </div>
-            <section id="hist-detail" class="history-detail" hidden aria-live="polite"></section>
-          </section>
-
-          <!-- Exportações -->
-          <section class="card" aria-labelledby="exp-title">
-            <div class="card-header">
-              <h2 id="exp-title"><span data-icon="database"></span>Exportação e backup</h2>
-            </div>
-            <div class="export-grid">
-              <button id="exp-json" class="export-item" type="button">
-                <span class="ei-icon" data-icon="download"></span>
-                <span><strong>Exportar JSON</strong><small>Backup completo, reimportável</small></span>
-              </button>
-              <button id="exp-csv" class="export-item" type="button">
-                <span class="ei-icon" data-icon="download"></span>
-                <span><strong>Exportar CSV</strong><small>Resultados de todos os cargos</small></span>
-              </button>
-            </div>
-            <p class="hint mt-3">Os dados ficam no Firebase. Guarde uma exportação JSON ao fim de cada reunião como cópia de segurança.</p>
-          </section>
-
-          <!-- Zona de risco -->
-          <section class="card danger-zone" aria-labelledby="danger-title" data-mutating>
-            <div class="danger-row">
-              <div>
-                <h2 id="danger-title">Encerrar reunião</h2>
-                <p class="small muted mt-1">A reunião fica somente leitura. Resultados finalizados nunca são sobrescritos.</p>
+              <div class="stack">
+                <button id="exp-json" class="btn btn-secondary btn-block" type="button"><span data-icon="download"></span>Exportar JSON</button>
+                <button id="exp-csv" class="btn btn-secondary btn-block" type="button"><span data-icon="download"></span>Exportar CSV</button>
+                <button id="btn-setup" class="btn btn-ghost btn-block" type="button"><span data-icon="plus"></span>Nova reunião / anteriores</button>
               </div>
-              <button id="btn-archive" class="btn btn-danger-outline" type="button"><span data-icon="archive"></span>Encerrar reunião</button>
-            </div>
-          </section>
+            </section>
+          </aside>
         </div>
+
+        <!-- Histórico -->
+        <section id="history" class="card" aria-labelledby="hist-title" tabindex="-1">
+          <div class="card-header">
+            <h2 id="hist-title"><span data-icon="history"></span>Histórico de cargos</h2>
+          </div>
+          <div class="table-wrap">
+            <table class="history-table">
+              <thead>
+                <tr>
+                  <th scope="col">Cargo</th>
+                  <th scope="col" class="hide-sm">Tipo</th>
+                  <th scope="col">Encerrado em</th>
+                  <th scope="col" class="num">Votos</th>
+                  <th scope="col" class="num hide-sm">Abstenções</th>
+                  <th scope="col"><span class="sr-only">Ações</span></th>
+                </tr>
+              </thead>
+              <tbody id="hist-list"></tbody>
+            </table>
+          </div>
+          <section id="hist-detail" class="history-detail" hidden aria-live="polite" tabindex="-1"></section>
+        </section>
       </section>
     </main>
-
   </body>
 </html>

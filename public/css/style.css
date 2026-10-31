@@ -276,31 +276,9 @@ textarea {
   border: 0;
 }
 
-.skip-link {
-  position: absolute;
-  left: var(--space-3);
-  top: -60px;
-  z-index: 200;
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--primary);
-  font-weight: 600;
-  box-shadow: var(--shadow-md);
-  transition: top var(--dur) var(--ease);
-}
-
-.skip-link:focus {
-  top: calc(var(--space-3) + var(--safe-top));
-}
-
 /* ---------- 5. Utilitários ---------- */
 .stack > * + * {
   margin-top: var(--space-4);
-}
-
-.stack-sm > * + * {
-  margin-top: var(--space-2);
 }
 
 .stack-lg > * + * {
@@ -312,19 +290,6 @@ textarea {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-}
-
-.row.between {
-  justify-content: space-between;
-}
-
-.row.end {
-  justify-content: flex-end;
-}
-
-.grow {
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
 .muted {
@@ -345,24 +310,8 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-.center {
-  text-align: center;
-}
-
-.mt-1 {
-  margin-top: var(--space-1);
-}
-
-.mt-2 {
-  margin-top: var(--space-2);
-}
-
 .mt-3 {
   margin-top: var(--space-3);
-}
-
-.mt-4 {
-  margin-top: var(--space-4);
 }
 
 .mt-6 {
@@ -373,10 +322,6 @@ textarea {
   margin-bottom: var(--space-4);
 }
 
-.nums {
-  font-variant-numeric: tabular-nums;
-}
-
 .eyebrow {
   display: block;
   font-size: var(--text-xs);
@@ -384,12 +329,6 @@ textarea {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
-}
-
-.divider {
-  border: 0;
-  border-top: 1px solid var(--border);
-  margin: var(--space-4) 0;
 }
 
 /* ---------- 6. Ícones ---------- */
@@ -470,10 +409,6 @@ textarea {
   padding: var(--space-6) calc(var(--space-4) + var(--safe-right)) var(--space-10) calc(var(--space-4) + var(--safe-left));
 }
 
-.container.narrow {
-  max-width: 560px;
-}
-
 /* ---------- 9. Superfícies ---------- */
 .card {
   background: var(--surface);
@@ -501,12 +436,6 @@ textarea {
 
 .card-header .icon {
   color: var(--text-muted);
-}
-
-.card-subtitle {
-  margin-top: var(--space-1);
-  color: var(--text-muted);
-  font-size: var(--text-sm);
 }
 
 /* ---------- 10. Botões ---------- */
@@ -597,13 +526,6 @@ textarea {
   --btn-fg: #fff;
   --btn-border: var(--danger);
   --btn-hover: var(--danger-hover);
-}
-
-.btn-danger-outline {
-  --btn-bg: transparent;
-  --btn-fg: var(--danger);
-  --btn-border: color-mix(in srgb, var(--danger) 45%, transparent);
-  --btn-hover: var(--danger-soft);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -815,11 +737,6 @@ textarea {
   color: var(--text-muted);
 }
 
-.chip.active {
-  background: var(--primary-soft);
-  color: var(--primary-soft-ink);
-}
-
 .chip.offline,
 .chip.connecting {
   background: var(--warn-soft);
@@ -866,40 +783,6 @@ textarea {
 .banner .banner-close {
   margin-left: auto;
   color: inherit;
-}
-
-.offline-bar {
-  position: sticky;
-  top: 0;
-  z-index: 60;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  padding: calc(var(--space-2) + var(--safe-top)) var(--space-4) var(--space-2);
-  background: var(--warn-soft);
-  color: var(--warn);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  text-align: center;
-}
-
-/* ---------- 14. Progresso ---------- */
-.progress {
-  position: relative;
-  height: 8px;
-  border-radius: var(--radius-full);
-  background: var(--surface-3);
-  overflow: hidden;
-}
-
-.progress > span {
-  display: block;
-  height: 100%;
-  width: 0;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--primary), var(--accent));
-  transition: width var(--dur-slow) var(--ease);
 }
 
 /* ---------- 15. Resultados (barras) ---------- */
@@ -1119,11 +1002,6 @@ th.num {
   animation: shimmer 1.4s ease infinite;
 }
 
-.sk-line {
-  height: 12px;
-  margin: var(--space-2) 0;
-}
-
 .sk-title {
   height: 22px;
   width: 55%;
@@ -1133,18 +1011,6 @@ th.num {
 .sk-block {
   height: 64px;
   border-radius: var(--radius);
-}
-
-.sk-w-80 {
-  width: 80%;
-}
-
-.sk-w-60 {
-  width: 60%;
-}
-
-.sk-w-40 {
-  width: 40%;
 }
 
 /* ---------- 19. Modal ---------- */
@@ -1275,23 +1141,6 @@ dialog.modal::backdrop {
   }
 }
 
-/* ---------- 21. Telas de entrada (index / offline) ---------- */
-.entry {
-  display: grid;
-  gap: var(--space-5);
-  padding-top: var(--space-8);
-}
-
-.entry-hero {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.entry-hero h1 {
-  font-size: clamp(1.75rem, 6vw, 2.25rem);
-  letter-spacing: -0.025em;
-}
-
 .entry-icon {
   display: grid;
   place-items: center;
@@ -1311,21 +1160,6 @@ dialog.modal::backdrop {
 .entry-icon.warn {
   background: var(--warn-soft);
   color: var(--warn);
-}
-
-.code-input {
-  font-family: var(--font-mono);
-  font-size: var(--text-lg) !important;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  text-align: center;
-}
-
-.footer-note {
-  padding-bottom: calc(var(--space-6) + var(--safe-bottom));
-  text-align: center;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
 }
 
 /* ---------- 22. Animações ---------- */
@@ -1386,10 +1220,6 @@ dialog.modal::backdrop {
     opacity: 1;
     transform: scale(1);
   }
-}
-
-.fade-in {
-  animation: rise-in var(--dur-slow) var(--ease);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1516,53 +1346,6 @@ dialog.modal::backdrop {
 
 .action-card:hover .action-go {
   transform: translateX(3px);
-}
-
-.meeting-list {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.meeting-list .sk-block {
-  height: 58px;
-}
-
-.meeting-option {
-  position: relative;
-}
-
-.meeting-option input {
-  position: absolute;
-  opacity: 0;
-  width: 1px;
-  height: 1px;
-}
-
-.meeting-option label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  min-height: 58px;
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-  border: 2px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text);
-  font-size: var(--text-base);
-  cursor: pointer;
-  transition: border-color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
-}
-
-.meeting-option input:checked + label {
-  border-color: var(--primary);
-  background: var(--primary-soft);
-}
-
-.meeting-option input:focus-visible + label {
-  outline: 3px solid var(--focus);
-  outline-offset: 2px;
 }
 
 .meeting-name {

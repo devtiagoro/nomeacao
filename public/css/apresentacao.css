@@ -315,14 +315,6 @@
   color: var(--text-muted);
 }
 
-.stage-progress {
-  height: clamp(10px, 0.9vw, 16px);
-}
-
-.stage-progress > span {
-  background: linear-gradient(90deg, #2a9d8f, #7fdccf);
-}
-
 /* Resultados no palco */
 .stage-results {
   padding: clamp(20px, 2vw, 40px);
@@ -407,13 +399,11 @@
 
 /* Visões */
 [data-view='results'] .stage-main,
-[data-view='archived'] .stage-main,
 [data-view='waiting'] .stage-main {
   grid-template-columns: minmax(0, 1fr);
 }
 
-[data-view='results'] .stage-aside,
-[data-view='archived'] .stage-aside {
+[data-view='results'] .stage-aside {
   display: none;
 }
 
@@ -427,8 +417,7 @@
   display: none;
 }
 
-[data-view='results'] .stage-content,
-[data-view='archived'] .stage-content {
+[data-view='results'] .stage-content {
   max-width: 1500px;
   width: 100%;
   margin: 0 auto;
@@ -436,16 +425,6 @@
 
 [data-view='loading'] .stage-aside {
   visibility: hidden;
-}
-
-.stage-footer {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: clamp(10px, 1vw, 18px) clamp(20px, 3vw, 56px);
-  border-top: 1px solid var(--border);
-  font-size: var(--stage-small);
-  color: var(--text-faint);
 }
 
 /* Telas pequenas (pré-visualização no notebook/celular) */
@@ -462,9 +441,7 @@
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   }
 
-  .stage-footer {
-    flex-direction: column;
-  }
+  
 }
 
 @media (max-width: 560px) {

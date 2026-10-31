@@ -16,7 +16,7 @@ export const firebaseConfig = null;
 export const firebaseConfig = {
   apiKey: 'AIza...',
   authDomain: 'seu-projeto.firebaseapp.com',
-  databaseURL: 'https://seu-projeto-default-rtdb.firebaseio.com',
+  databaseURL: 'https://console.firebase.google.com/u/0/project/nomeacao-905ed/database/nomeacao-905ed-default-rtdb/data/~2F?hl=pt-br',
   projectId: 'seu-projeto',
   appId: '1:000000000000:web:0000000000000000',
 };

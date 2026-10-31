@@ -1,134 +1,117 @@
-import { el, $, setText, announce, isMeetingId, statusChip, renderResults, STATUS_LABEL, registerServiceWorker, icon, storage } from './common.js';
-import { configured, watchMeeting, watchConnection, qrDataUrl, pageUrl } from './db.js';
+import { el, $, setText, announce, statusChip, renderResults, STATUS_LABEL, icon } from './common.js';
+import { configured, watchMeeting, watchConnection, watchCurrent, qrDataUrl, pageUrl } from './db.js';
 
-registerServiceWorker();
+// Telão: segue a reunião em andamento e o cargo atual, sem interação.
 
-const meetingId = new URLSearchParams(location.search).get('m') || storage.lastMeeting();
-let lastCandidatesKey = '';
-let lastResultsKey = '';
+let meetingId = null;
+let stopMeeting = null;
+let lastOfficeId = null;
+let lastStatus = null;
+let candidatesKey = '';
+let resultsKey = '';
 let resultsShownFor = null;
 
-function fail(text) {
-  const e = $('#error');
-  e.replaceChildren(icon('alert'), el('span', {}, text));
-  e.hidden = false;
-  setText('#office-title', 'Apresentação indisponível');
-}
-
 const STATUS_LINE = {
-  discussing: ['users', 'Em discussão — a votação ainda não foi aberta.'],
+  discussing: ['users', 'A votação ainda não foi aberta.'],
   voting_open: ['ballot', 'Votação aberta — leia o QR Code e vote pelo celular.'],
   closed: ['lock', 'Votação encerrada.'],
 };
 
-/** Visão do palco: waiting | discussing | voting | closed | results | archived. */
-function viewOf(s, o) {
-  if (s.status === 'archived') return 'archived';
+/** Visão do palco: waiting | discussing | voting | closed | results. */
+function viewOf(o) {
   if (!o) return 'waiting';
   if (o.status === 'discussing') return 'discussing';
   if (o.status === 'voting_open') return 'voting';
-  return o.results ? 'results' : 'closed';
+  return o.result ? 'results' : 'closed';
 }
 
-function render(s, type) {
+function showWaiting(title, name = '') {
+  $('#stage').dataset.view = 'waiting';
+  setText('#meeting-name', name);
+  setText('#office-title', title);
+  setText('#office-desc', 'Leia o QR Code para votar pelo celular.');
+  for (const id of ['#office-status', '#status-line', '#candidates', '#results']) $(id).replaceChildren();
+  candidatesKey = resultsKey = '';
+}
+
+function render(s) {
   const o = s.currentOffice;
-  const view = viewOf(s, o);
-  $('#stage').dataset.view = view;
+  $('#stage').dataset.view = viewOf(o);
   setText('#meeting-name', s.name);
-  setText('#meeting-title', s.name);
   document.title = `${s.name} — Apresentação`;
+  if (!o) return showWaiting('Aguardando o próximo cargo', s.name);
 
-  // Título e estado
-  if (view === 'archived') {
-    setText('#office-title', 'Reunião encerrada');
-    setText('#office-desc', 'Obrigado pela participação.');
-    $('#office-status').replaceChildren(el('span', { class: 'chip archived' }, STATUS_LABEL.archived));
-    $('#status-line').replaceChildren();
-  } else if (!o) {
-    setText('#office-title', 'Aguardando o primeiro cargo');
-    setText('#office-desc', 'Leia o QR Code para acompanhar a reunião pelo celular.');
-    $('#office-status').replaceChildren();
-    $('#status-line').replaceChildren();
-  } else {
-    setText('#office-title', o.title);
-    setText('#office-desc', o.description || '');
-    $('#office-status').replaceChildren(el('span', { class: `chip ${o.status}` }, STATUS_LABEL[o.status]));
-    const [ic, text] = STATUS_LINE[o.status] || [];
-    $('#status-line').replaceChildren(...(text ? [icon(ic), el('span', {}, view === 'results' ? 'Resultado da votação' : text)] : []));
-  }
+  setText('#office-title', o.title);
+  setText('#office-desc', o.voteType === 'multiple' ? `Múltipla escolha · até ${o.maxChoices} nomes por cédula` : 'Escolha única');
+  $('#office-status').replaceChildren(el('span', { class: `chip ${o.status}` }, STATUS_LABEL[o.status]));
+  const [ic, text] = STATUS_LINE[o.status] || [];
+  $('#status-line').replaceChildren(icon(ic), el('span', {}, o.status === 'closed' && o.result ? 'Resultado final' : text));
 
-  // Nomes indicados (some quando há resultados no palco)
-  const showCandidates = o && s.status !== 'archived' && !o.results;
-  const ck = JSON.stringify([showCandidates, o?.candidates]);
-  if (ck !== lastCandidatesKey) {
-    lastCandidatesKey = ck;
+  // Nomes propostos (dão lugar ao resultado quando ele é exibido)
+  const showCandidates = !o.result;
+  const ck = JSON.stringify([showCandidates, o.candidates]);
+  if (ck !== candidatesKey) {
+    candidatesKey = ck;
     $('#candidates').replaceChildren(
       showCandidates
         ? o.candidates.length
           ? el(
               'ul',
-              { class: 'stage-candidates candidate-list', 'aria-label': 'Nomes indicados' },
+              { class: 'stage-candidates', 'aria-label': 'Nomes propostos' },
               o.candidates.map((c, i) => el('li', {}, el('span', { class: 'idx', 'aria-hidden': 'true' }, String(i + 1)), el('span', {}, c.name))),
             )
-          : el('p', { class: 'stage-empty' }, 'Nenhum nome indicado ainda.')
+          : el('p', { class: 'stage-empty' }, 'Nenhum nome proposto ainda.')
         : '',
     );
   }
 
-  // Resultados: animados na primeira exibição de cada cargo
-  const rk = JSON.stringify([o?.id, o?.results]);
-  if (rk !== lastResultsKey) {
-    lastResultsKey = rk;
+  // Resultado: parcial (se liberado) ou final; animado na primeira exibição de cada cargo
+  const rk = JSON.stringify([o.id, o.result]);
+  if (rk !== resultsKey) {
+    resultsKey = rk;
     let node = '';
-    if (o && o.results) {
-      const firstForOffice = resultsShownFor !== o.id;
+    if (o.result) {
+      const first = resultsShownFor !== o.id;
       resultsShownFor = o.id;
-      node = el(
-        'section',
-        { class: 'stage-results' },
-        el('h3', {}, o.status === 'closed' ? 'Resultado' : 'Apuração parcial'),
-        renderResults(o.results, { animate: firstForOffice }),
-      );
-    } else if (o && o.status === 'closed') {
-      node = el('p', { class: 'stage-status' }, icon('clock'), el('span', {}, 'O resultado será divulgado pela mesa.'));
+      node = el('section', { class: 'stage-results' }, el('h3', {}, o.status === 'closed' ? 'Resultado' : 'Resultado parcial'), renderResults(o.result, { animate: first }));
     }
     $('#results').replaceChildren(node);
   }
 
-  // Contadores independentes: votos enviados × pessoas presentes (informado pela mesa).
-  setText('#t-voted', o ? o.turnout.votes : 0);
+  setText('#t-voted', o.ballots);
   setText('#t-expected', s.expectedParticipants);
-  $('#turnout-card').hidden = !o || o.status === 'discussing';
+  $('#turnout-card').hidden = o.status === 'discussing';
 
-  const msgs = {
-    vote_opened: 'Votação aberta.',
-    vote_closed: 'Votação encerrada.',
-    results_published: 'Resultados publicados.',
-    next_office: o && `Próximo cargo: ${o.title}.`,
-  };
-  if (msgs[type]) announce(msgs[type]);
+  if (o.id !== lastOfficeId) announce(`Cargo: ${o.title}.`);
+  else if (o.status !== lastStatus) announce(STATUS_LINE[o.status]?.[1] || '');
+  lastOfficeId = o.id;
+  lastStatus = o.status;
 }
 
-if (!isMeetingId(meetingId)) {
-  // Sem reunião escolhida: a página inicial lista as reuniões disponíveis.
-  location.replace('index.html');
-} else {
-  storage.rememberMeeting(meetingId);
-  // O link público é o próprio endereço publicado (ex.: GitHub Pages) da tela de votação.
-  const publicUrl = pageUrl('votar.html', meetingId);
-  setText('#public-link', publicUrl);
-  qrDataUrl(publicUrl)
-    .then((src) => {
-      $('#qr').src = src;
-    })
-    .catch(() => {});
-  if (!configured) {
-    fail('Esta publicação ainda não está ligada ao Firebase (js/firebase-config.js).');
-  } else {
-    watchConnection((st) => statusChip($('#conn'), st))
-      .then(() => watchMeeting(meetingId, {}, render, (reason) => fail(reason === 'not_found' ? 'Reunião não encontrada.' : 'Acesso negado.')))
-      .catch((e) => fail(e.message));
-  }
+async function follow(id) {
+  stopMeeting?.();
+  stopMeeting = null;
+  meetingId = id;
+  if (!id) return showWaiting('Aguardando o início da reunião');
+  const stop = await watchMeeting(id, {}, (s) => meetingId === id && render(s), () => showWaiting('Aguardando o início da reunião'));
+  if (meetingId === id) stopMeeting = stop;
+  else stop();
+}
+
+// O link público é a tela de votação no próprio endereço publicado (ex.: GitHub Pages).
+const publicUrl = pageUrl('votar.html');
+setText('#public-link', publicUrl);
+qrDataUrl(publicUrl)
+  .then((src) => {
+    $('#qr').src = src;
+  })
+  .catch(() => {});
+
+if (!configured) showWaiting('Apresentação indisponível no momento');
+else {
+  watchConnection((st) => statusChip($('#conn'), st))
+    .then(() => watchCurrent(follow))
+    .catch(() => showWaiting('Apresentação indisponível no momento'));
 }
 
 $('#fullscreen').addEventListener('click', () => {

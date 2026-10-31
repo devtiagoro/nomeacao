@@ -1,6 +1,6 @@
 // NOMEIA — utilidades compartilhadas (ES module, sem dependências).
 // Todo texto vindo do servidor é inserido via textContent (nunca innerHTML) para evitar XSS.
-// Todos os caminhos são relativos: funciona em subpastas (GitHub Pages). Dados: js/db.js (Firebase).
+// Caminhos relativos: funciona em subpastas (GitHub Pages). Dados: js/db.js (Firebase).
 
 /** Cria elementos de forma segura: el('p', {class: 'x'}, 'texto', filho). */
 export function el(tag, props = {}, ...children) {
@@ -43,84 +43,30 @@ export function announce(message, { assertive = false } = {}) {
 }
 
 export const STATUS_LABEL = {
-  draft: 'Aguardando cargo',
-  discussing: 'Em discussão',
+  draft: 'Em preparação',
+  discussing: 'Apresentado',
   voting_open: 'Votação aberta',
-  closed: 'Votação encerrada',
-  archived: 'Reunião encerrada',
-  active: 'Ativa',
+  closed: 'Encerrado',
 };
 
 export function fmtPct(n) {
   return `${Number(n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
 }
 
-export function fmtDate(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium' });
+export function fmtDate(t) {
+  if (!t) return '—';
+  return new Date(t).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
 export function plural(n, one, many) {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-// ---------------- Preferência local ----------------
-// Guarda apenas qual reunião foi aberta por último (atalho de navegação).
-// Nunca é usado para limitar votos.
-
-function safeStorage(kind) {
-  try {
-    const s = window[kind];
-    const k = '__nomeia_test__';
-    s.setItem(k, '1');
-    s.removeItem(k);
-    return s;
-  } catch {
-    return null;
-  }
-}
-
-export const storage = {
-  lastMeeting() {
-    return safeStorage('localStorage')?.getItem('nomeia:lastMeeting') || null;
-  },
-  rememberMeeting(meetingId) {
-    safeStorage('localStorage')?.setItem('nomeia:lastMeeting', meetingId);
-  },
-};
-
-export const isMeetingId = (v) => typeof v === 'string' && /^m_[A-Za-z0-9_-]{12}$/.test(v);
-
-// ---------------- Conectividade e PWA ----------------
-
-export function setupOfflineBar() {
-  const bar = el(
-    'div',
-    { class: 'offline-bar', role: 'status', hidden: true },
-    icon('wifi-off'),
-    el('span', {}, 'Sem conexão. Votos não são enviados offline.'),
-  );
-  document.body.prepend(bar);
-  const update = () => {
-    bar.hidden = navigator.onLine;
-  };
-  window.addEventListener('online', update);
-  window.addEventListener('offline', update);
-  update();
-  return bar;
-}
-
-export function registerServiceWorker() {
-  if ('serviceWorker' in navigator && window.isSecureContext) {
-    navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
-  }
-}
-
+/** Indicador de conexão com o banco (tempo real). */
 export function statusChip(node, status) {
   const labels = { online: 'Ao vivo', offline: 'Reconectando…', connecting: 'Conectando…' };
   node.className = `chip ${status}`;
   node.textContent = labels[status] || status;
-  node.title = status === 'online' ? 'Conectado ao servidor: atualizações em tempo real' : 'Sem conexão com o servidor no momento';
 }
 
 // ---------------- Ícones (SVG lineares, 24×24) ----------------
@@ -139,36 +85,23 @@ const ICONS = {
   lock: ['r:5,11,14,10,2', 'p:M8 11V7a4 4 0 0 1 8 0v4'],
   stop: ['c:12,12,9', 'r:9,9,6,6,1'],
   'arrow-right': ['p:M5 12h14', 'p:m13 6 6 6-6 6'],
-  'arrow-left': ['p:M19 12H5', 'p:m11 18-6-6 6-6'],
   monitor: ['r:3,4,18,12,2', 'p:M8 20h8', 'p:M12 16v4'],
   history: ['p:M3 12a9 9 0 1 0 3-6.7L3 8', 'p:M3 3v5h5', 'p:M12 7v5l3 2'],
   users: ['c:9,8,3.5', 'p:M2.5 20a6.5 6.5 0 0 1 13 0', 'p:M16 4.6a3.5 3.5 0 0 1 0 6.8', 'p:M21.5 20a6.5 6.5 0 0 0-4-6'],
-  user: ['c:12,8,4', 'p:M4 21a8 8 0 0 1 16 0'],
   download: ['p:M12 4v11', 'p:m7 10 5 5 5-5', 'p:M5 20h14'],
-  upload: ['p:M12 20V9', 'p:m7 14 5-5 5 5', 'p:M5 4h14'],
   copy: ['r:9,9,12,12,2', 'p:M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1'],
-  external: ['p:M14 4h6v6', 'p:M20 4 11 13', 'p:M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5'],
   qr: ['r:3,3,7,7,1', 'r:14,3,7,7,1', 'r:3,14,7,7,1', 'p:M14 14h3v3h-3z', 'p:M20 14v.01', 'p:M14 20h.01', 'p:M17 20h3v-3'],
-  printer: ['p:M7 9V3h10v6', 'r:3,9,18,8,2', 'p:M7 14h10v7H7z'],
   logout: ['p:M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3', 'p:m10 17-5-5 5-5', 'p:M5 12h11'],
   alert: ['p:M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z', 'p:M12 9v4', 'p:M12 17h.01'],
   info: ['c:12,12,9', 'p:M12 16v-4', 'p:M12 8h.01'],
   'wifi-off': ['p:m2 2 20 20', 'p:M8.5 16.4a5 5 0 0 1 7 0', 'p:M5 12.8a10 10 0 0 1 5.2-2.7', 'p:M19 12.8a10 10 0 0 0-2.3-1.6', 'p:M2 9a15 15 0 0 1 4.3-2.6', 'p:M22 9a15 15 0 0 0-10.4-4', 'p:M12 20h.01'],
   ballot: ['r:4,3,16,18,2', 'p:m8.5 11.5 2.5 2.5 4.5-5', 'p:M8 17h8'],
   chart: ['p:M4 20h16', 'r:6,11,3,6,0.5', 'r:11,6,3,11,0.5', 'r:16,9,3,8,0.5'],
-  bars: ['p:M4 6h10', 'p:M4 12h16', 'p:M4 18h7'],
-  key: ['c:7.5,15.5,4.5', 'p:m10.7 12.3 9.8-9.8', 'p:m17 5 3 3', 'p:m14.5 7.5 2 2'],
   shield: ['p:M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6Z', 'p:m9 12 2 2 4-4'],
   maximize: ['p:M4 9V4h5', 'p:M20 9V4h-5', 'p:M4 15v5h5', 'p:M20 15v5h-5'],
-  archive: ['r:3,4,18,4,1', 'p:M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8', 'p:M10 12h4'],
-  database: ['p:M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3Z', 'p:M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6', 'p:M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6'],
-  eye: ['p:M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z', 'c:12,12,3'],
   refresh: ['p:M20 11a8 8 0 0 0-14.9-3.5L3 10', 'p:M3 4v6h6', 'p:M4 13a8 8 0 0 0 14.9 3.5L21 14', 'p:M21 20v-6h-6'],
   clock: ['c:12,12,9', 'p:M12 7v5l3 2'],
-  link: ['p:M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1', 'p:M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1'],
-  sliders: ['p:M4 6h10', 'p:M18 6h2', 'c:16,6,2', 'p:M4 12h2', 'p:M10 12h10', 'c:8,12,2', 'p:M4 18h10', 'p:M18 18h2', 'c:16,18,2'],
   calendar: ['r:3,5,18,16,2', 'p:M3 10h18', 'p:M8 3v4', 'p:M16 3v4'],
-  minus: ['p:M5 12h14'],
   inbox: ['p:M3 13h5l2 3h4l2-3h5', 'p:M5 5h14l2 8v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5Z'],
 };
 
@@ -301,49 +234,41 @@ function barRow({ name, votes, pct, pctLabel, className = '', badges = [] }) {
 }
 
 /**
- * Resultado completo: todos os candidatos (inclusive com zero votos), abstenções separadas,
- * empate identificado e resumo de participação. Nunca declara eleito: apenas "mais votado".
+ * Resultado completo: todos os candidatos (inclusive com zero votos), abstenções separadas
+ * e resumo. Percentual = votos ÷ cédulas válidas (na múltipla escolha a soma passa de 100%).
+ * Nunca declara eleito: na escolha única indica o mais votado ou o empate.
  * animate=true anima as barras a partir de zero (respeita prefers-reduced-motion).
  */
-export function renderResults(results, { showAbstain = true, animate = false, compact = false } = {}) {
-  const leaders = new Set(results.leaders || []);
+export function renderResults(results, { animate = false } = {}) {
+  const single = results.voteType !== 'multiple';
+  const leaders = new Set(single ? results.leaders : []);
   const sorted = [...results.candidates].sort((a, b) => b.votes - a.votes || a.name.localeCompare(b.name, 'pt-BR'));
   const list = el('ol', { class: 'results', 'aria-label': 'Resultado por candidato' });
   for (const c of sorted) {
     const isLeader = leaders.has(c.id);
     const badges = isLeader ? [el('span', { class: `result-badge${results.tie ? ' tie' : ''}` }, results.tie ? 'Empate' : 'Mais votado')] : [];
-    list.append(
-      barRow({ name: c.name, votes: c.votes, pct: c.pctValid, pctLabel: 'dos votos válidos', className: isLeader ? 'is-leader' : '', badges }),
-    );
+    list.append(barRow({ name: c.name, votes: c.votes, pct: c.pct, pctLabel: 'das cédulas válidas', className: isLeader ? 'is-leader' : '', badges }));
   }
-  if (showAbstain) {
-    list.append(
-      barRow({ name: 'Abstenções', votes: results.abstentions, pct: results.abstentionPctCast, pctLabel: 'dos votos registrados', className: 'is-abstain' }),
-    );
-  }
+  const abstPct = results.ballots ? Math.round((results.abstentions * 10000) / results.ballots) / 100 : 0;
+  list.append(barRow({ name: 'Abstenções', votes: results.abstentions, pct: abstPct, pctLabel: 'das cédulas', className: 'is-abstain' }));
 
   const notes = [];
-  if (results.tie) {
+  if (!results.ballots) notes.push(el('p', { class: 'banner info' }, icon('info'), el('span', {}, 'Nenhum voto registrado.')));
+  else if (single && results.tie) {
     const names = results.candidates.filter((c) => leaders.has(c.id)).map((c) => c.name);
     notes.push(el('p', { class: 'banner warn' }, icon('alert'), el('span', {}, `Empate entre ${names.join(' e ')}, com ${plural(results.maxVotes, 'voto', 'votos')} cada.`)));
-  } else if (!leaders.size) {
-    notes.push(el('p', { class: 'banner info' }, icon('info'), el('span', {}, 'Nenhum candidato recebeu votos.')));
   }
-  if (results.singleCandidate) {
-    notes.push(el('p', { class: 'small muted' }, 'Candidatura única: o resultado mostra votos e abstenções. A aprovação segue o regimento da reunião.'));
-  }
+  if (!single) notes.push(el('p', { class: 'small muted' }, `Múltipla escolha: até ${results.maxChoices} nomes por cédula; a soma dos percentuais pode passar de 100%.`));
 
   const stat = (label, value) => el('div', {}, el('dt', {}, label), el('dd', {}, String(value)));
-  const summary = compact
-    ? null
-    : el(
-        'dl',
-        { class: 'result-summary' },
-        stat('Votos registrados', results.castVotes),
-        stat('Válidos', results.validVotes),
-        stat('Abstenções', results.abstentions),
-        stat('Pessoas presentes', results.presentParticipants ?? results.expectedParticipants ?? '—'),
-      );
+  const summary = el(
+    'dl',
+    { class: 'result-summary' },
+    stat('Cédulas', results.ballots),
+    stat('Abstenções', results.abstentions),
+    single ? null : stat('Votos em nomes', results.totalVotes),
+    stat('Presentes', results.present ?? '—'),
+  );
 
   const root = el('div', { class: 'result' }, list, notes.length ? el('div', { class: 'result-notes' }, ...notes) : null, summary);
   const rows = [...list.querySelectorAll('.result-row')];

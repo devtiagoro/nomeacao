@@ -1,4 +1,4 @@
-/* NOMEIA — Votação mobile (mobile-first, modo instalado, safe areas). */
+/* NOMEIA — Votação mobile (mobile-first, safe areas). */
 
 .page-vote {
   background: var(--bg);
@@ -42,7 +42,7 @@
     calc(var(--space-4) + var(--safe-left));
 }
 
-#view-main > * + * {
+.vote-main > * + * {
   margin-top: var(--space-4);
 }
 
@@ -250,6 +250,16 @@
   font-weight: 600;
 }
 
+/* Múltipla escolha: marcador quadrado; opções além do limite ficam esmaecidas */
+.option input[type='checkbox'] + label .option-radio {
+  border-radius: var(--radius-sm);
+}
+
+.option input:disabled + label {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .options-divider {
   display: flex;
   align-items: center;
@@ -353,20 +363,6 @@
   display: none;
 }
 
-/* Modal de confirmação do voto */
-.confirm-choice {
-  margin: var(--space-3) 0;
-  padding: var(--space-4);
-  border: 2px solid var(--primary);
-  border-radius: var(--radius-lg);
-  background: var(--primary-soft);
-  color: var(--primary-soft-ink);
-  font-size: var(--text-xl);
-  font-weight: 700;
-  text-align: center;
-  overflow-wrap: anywhere;
-}
-
 /* Skeleton da tela */
 .vote-skeleton {
   display: grid;
@@ -384,12 +380,5 @@
     margin-right: 0;
     padding-left: 0;
     padding-right: 0;
-  }
-}
-
-/* Modo instalado (PWA) */
-@media (display-mode: standalone) {
-  .vote-header {
-    background: var(--surface);
   }
 }

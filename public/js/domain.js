@@ -1,14 +1,13 @@
 // NOMEIA — regras de domínio do navegador (puras, sem DOM e sem rede).
-// Apuração, selo de integridade (SHA-256), CSV, exportação e importação.
+// Cédula (escolha única ou múltipla), apuração, CSV e exportação.
 // A autoridade sobre quem pode gravar o quê são as regras do Firebase (database.rules.json).
 
-export const SCHEMA_VERSION = 3;
 export const ABSTAIN = 'abstain';
-export const RESULTS_MODES = ['on_publish', 'on_close', 'live'];
-export const LIMITS = { nameMax: 120, descriptionMax: 500, expectedMax: 100_000, candidatesPerOffice: 100, officesPerMeeting: 200 };
-export const ID_RE = /^[mopc]_[A-Za-z0-9_-]{12}$/;
+export const VOTE_TYPES = ['single', 'multiple'];
+export const LIMITS = { nameMax: 120, presentMax: 100_000, candidatesPerOffice: 100 };
 export const REQUEST_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
 export const EXPORT_FORMAT = 'nomeia-export';
+export const EXPORT_VERSION = 4;
 
 export class DomainError extends Error {
   constructor(code, message) {
@@ -26,7 +25,7 @@ export function newId(prefix) {
   return `${prefix}_${btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
 }
 
-/** Identificador aleatório de uma confirmação de voto. */
+/** Identificador aleatório de uma confirmação de voto (evita contar duas vezes um reenvio). */
 export function newRequestId() {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
@@ -34,20 +33,14 @@ export function newRequestId() {
 }
 
 /** Texto de entrada: normaliza, remove caracteres de controle, valida tamanho. */
-export function cleanText(value, field, { min = 1, max = LIMITS.nameMax, optional = false } = {}) {
-  if (value === undefined || value === null || value === '') {
-    if (optional) return '';
-    throw new DomainError('invalid_input', `Preencha o campo "${field}".`);
-  }
-  if (typeof value !== 'string') throw new DomainError('invalid_input', `Campo "${field}" inválido.`);
+export function cleanText(value, field, { max = LIMITS.nameMax } = {}) {
+  if (typeof value !== 'string' || !value.trim()) throw new DomainError('invalid_input', `Preencha o campo "${field}".`);
   const text = value
     .normalize('NFC')
     .replace(/[\u0000-\u001F\u007F-\u009F​-‏‪-‮⁦-⁩]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  if (text.length < (optional ? 0 : min) || text.length > max) {
-    throw new DomainError('invalid_input', `"${field}" deve ter entre ${optional ? 0 : min} e ${max} caracteres.`);
-  }
+  if (!text || text.length > max) throw new DomainError('invalid_input', `"${field}" deve ter entre 1 e ${max} caracteres.`);
   return text;
 }
 
@@ -71,69 +64,60 @@ export function officeList(meeting) {
   return Object.values(meeting?.offices || {}).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 }
 
-/** Fase global da reunião: draft | discussing | voting_open | closed | archived. */
-export function phase(m) {
-  if (m.status === 'archived') return 'archived';
-  const cur = m.offices?.[m.currentOfficeId];
-  return cur ? cur.status : 'draft';
+/** Cargo ainda não encerrado (em preparação, apresentado ou com votação aberta). */
+export function activeOffice(meeting) {
+  return officeList(meeting).find((o) => o.status !== 'closed') || null;
 }
 
-export function activeOffice(m) {
-  return officeList(m).find((o) => o.status === 'discussing' || o.status === 'voting_open') || null;
+/** Máximo de nomes por cédula: 1 na escolha única. */
+export const maxChoicesOf = (office) => (office.voteType === 'multiple' ? office.maxChoices : 1);
+
+/**
+ * Converte a seleção da tela em chaves de contagem de UMA cédula.
+ * Nenhum nome selecionado = abstenção. Escolha única: exatamente um nome.
+ * Múltipla escolha: de 1 até maxChoices nomes distintos.
+ */
+export function ballotChoices(office, selectedIds) {
+  const ids = [...new Set(selectedIds || [])];
+  if (!ids.length || (ids.length === 1 && ids[0] === ABSTAIN)) return [ABSTAIN];
+  if (ids.includes(ABSTAIN)) throw new DomainError('invalid_ballot', 'Abstenção não pode ser combinada com nomes.');
+  const max = maxChoicesOf(office);
+  if (ids.length > max) throw new DomainError('invalid_ballot', max === 1 ? 'Escolha apenas um nome.' : `Escolha no máximo ${max} nomes.`);
+  const valid = new Set(Object.values(office.candidates || {}).map((c) => c.id));
+  if (!ids.every((id) => valid.has(id))) throw new DomainError('invalid_ballot', 'A lista de nomes mudou. Revise sua escolha.');
+  return ids;
 }
 
 const pct = (n, d) => (d > 0 ? Math.round((n * 10000) / d) / 100 : 0);
 
 /**
- * Apuração a partir dos contadores por opção. Todos os candidatos aparecem, inclusive com zero.
- * Votos e pessoas presentes são independentes: um voto não representa uma pessoa.
- * Nunca declara aprovação automática: apenas indica o(s) mais votado(s) e empate.
+ * Apuração de um cargo. Todos os candidatos aparecem, inclusive com zero votos.
+ * ballots = cédulas registradas (contador público). Cada cédula conta 1 voto para cada nome marcado,
+ * ou 1 abstenção. Percentual de cada nome = votos ÷ cédulas válidas (sem abstenção);
+ * na múltipla escolha a soma dos percentuais pode passar de 100%.
+ * Nunca declara eleito: apenas indica o(s) mais votado(s) e empate.
  */
-export function computeResult(candidates, tallies, presentParticipants) {
+export function computeResult(office, tallies, ballots, present) {
   const t = tallies || {};
   const abstentions = Number(t[ABSTAIN] || 0);
-  const list = candidates.map((c) => ({ id: c.id, name: c.name, votes: Number(t[c.id] || 0) }));
-  const validVotes = list.reduce((a, c) => a + c.votes, 0);
-  const castVotes = validVotes + abstentions;
-  const out = list.map((c) => ({ ...c, pctValid: pct(c.votes, validVotes), pctCast: pct(c.votes, castVotes) }));
-  const maxVotes = out.reduce((a, c) => Math.max(a, c.votes), 0);
-  const leaders = maxVotes > 0 ? out.filter((c) => c.votes === maxVotes).map((c) => c.id) : [];
+  const total = Number(ballots || 0);
+  const validBallots = Math.max(0, total - abstentions);
+  const list = candidateList(office).map((c) => ({ ...c, votes: Number(t[c.id] || 0) }));
+  const maxVotes = list.reduce((a, c) => Math.max(a, c.votes), 0);
+  const leaders = maxVotes > 0 ? list.filter((c) => c.votes === maxVotes).map((c) => c.id) : [];
   return {
-    candidates: out,
-    castVotes,
-    validVotes,
+    voteType: office.voteType,
+    maxChoices: maxChoicesOf(office),
+    candidates: list.map((c) => ({ ...c, pct: pct(c.votes, validBallots) })),
+    ballots: total,
     abstentions,
-    abstentionPctCast: pct(abstentions, castVotes),
-    presentParticipants,
+    validBallots,
+    totalVotes: list.reduce((a, c) => a + c.votes, 0),
+    present: present ?? null,
     maxVotes,
     leaders,
     tie: leaders.length > 1,
-    singleCandidate: out.length === 1,
   };
-}
-
-/** JSON canônico (chaves ordenadas) para hash estável. */
-export function canonical(value) {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (value && typeof value === 'object') {
-    return `{${Object.keys(value)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
-
-export async function sha256Hex(text) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-/** Selo do resultado de um cargo encerrado. */
-export function resultHash(meetingId, office, result) {
-  return sha256Hex(
-    canonical({ meetingId, officeId: office.id, title: office.title, openedAt: office.openedAt ?? null, closedAt: office.closedAt ?? null, result }),
-  );
 }
 
 // ---------------- CSV ----------------
@@ -145,145 +129,41 @@ function csvCell(value) {
 }
 
 const num = (n) => String(n).replace('.', ',');
-const iso = (t) => (typeof t === 'number' ? new Date(t).toISOString() : t || '');
+const iso = (t) => (typeof t === 'number' ? new Date(t).toISOString() : '');
+export const VOTE_TYPE_LABEL = { single: 'Escolha única', multiple: 'Múltipla escolha' };
 
-const CSV_HEADER = ['reuniao_id', 'reuniao', 'cargo_id', 'cargo', 'aberto_em', 'encerrado_em', 'tipo', 'opcao_id', 'opcao', 'quantidade', 'pct_validos', 'pct_registrados'];
+const CSV_HEADER = ['reuniao', 'cargo', 'tipo', 'max_escolhas', 'estado', 'aberto_em', 'encerrado_em', 'item', 'nome', 'quantidade', 'pct_cedulas_validas'];
 
 /** CSV (";" e vírgula decimal, compatível com Excel pt-BR) dos cargos encerrados. */
-export function resultsCsv(meeting, results, officeIds = null) {
+export function resultsCsv(meeting, counts, tallies, officeIds = null) {
   const rows = [CSV_HEADER];
   for (const o of officeList(meeting)) {
-    const sealed = results?.[o.id];
-    if (o.status !== 'closed' || !sealed || (officeIds && !officeIds.includes(o.id))) continue;
-    const r = sealed.result;
-    const base = [meeting.id, meeting.name, o.id, o.title, iso(o.openedAt), iso(o.closedAt)];
-    for (const c of r.candidates) rows.push([...base, 'candidato', c.id, c.name, c.votes, num(c.pctValid), num(c.pctCast)]);
-    rows.push([...base, 'abstencao', '', 'Abstenção', r.abstentions, '', num(r.abstentionPctCast)]);
-    rows.push([...base, 'total', '', 'Votos registrados', r.castVotes, '', '100']);
-    rows.push([...base, 'total', '', 'Votos válidos (sem abstenção)', r.validVotes, '', '']);
-    rows.push([...base, 'presenca', '', 'Pessoas presentes (informado)', r.presentParticipants ?? r.expectedParticipants ?? '', '', '']);
-    rows.push([...base, 'resumo', '', r.tie ? 'Empate entre os mais votados' : 'Sem empate', r.leaders.length, '', '']);
-    rows.push([...base, 'integridade', '', `sha256:${sealed.resultHash}`, '', '', '']);
+    if (o.status !== 'closed' || (officeIds && !officeIds.includes(o.id))) continue;
+    const r = computeResult(o, tallies?.[o.id], counts?.[o.id], meeting.expectedParticipants);
+    const base = [meeting.name, o.title, VOTE_TYPE_LABEL[o.voteType], r.maxChoices, o.status, iso(o.openedAt), iso(o.closedAt)];
+    for (const c of r.candidates) rows.push([...base, 'candidato', c.name, c.votes, num(c.pct)]);
+    rows.push([...base, 'abstencao', 'Abstenções', r.abstentions, '']);
+    rows.push([...base, 'cedulas', 'Cédulas registradas', r.ballots, '']);
+    rows.push([...base, 'presentes', 'Pessoas presentes (informado)', r.present ?? '', '']);
   }
   return '﻿' + rows.map((row) => row.map(csvCell).join(';')).join('\r\n') + '\r\n';
 }
 
-// ---------------- Exportação / importação ----------------
+// ---------------- Exportação ----------------
 
-export function exportDoc({ meeting, results, counts, tallies, log }) {
+/** Exportação completa: dados brutos do banco + apuração calculada de cada cargo. */
+export function exportDoc({ meeting, counts, tallies }) {
+  const results = {};
+  for (const o of officeList(meeting)) {
+    results[o.id] = { title: o.title, status: o.status, ...computeResult(o, tallies?.[o.id], counts?.[o.id], meeting.expectedParticipants) };
+  }
   return {
     format: EXPORT_FORMAT,
-    schemaVersion: SCHEMA_VERSION,
+    version: EXPORT_VERSION,
     exportedAt: new Date().toISOString(),
     meeting,
-    results: results || {},
     counts: counts || {},
     tallies: tallies || {},
-    log: log || {},
+    results,
   };
-}
-
-const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
-const fail = (msg) => {
-  throw new DomainError('invalid_data', `Arquivo inválido: ${msg}`);
-};
-
-function validateMeetingV3(m) {
-  if (!isObj(m) || m.schemaVersion !== SCHEMA_VERSION) fail('versão da reunião');
-  if (!/^m_[A-Za-z0-9_-]{12}$/.test(m.id)) fail('id da reunião');
-  cleanText(m.name, 'nome');
-  if (!['active', 'archived'].includes(m.status)) fail('status');
-  cleanInt(m.expectedParticipants, 'pessoas presentes', 1, LIMITS.expectedMax);
-  for (const o of officeList(m)) {
-    if (!/^o_[A-Za-z0-9_-]{12}$/.test(o.id)) fail('id de cargo');
-    if (!['draft', 'discussing', 'voting_open', 'closed'].includes(o.status)) fail('status de cargo');
-    for (const c of Object.values(o.candidates || {})) if (!/^c_[A-Za-z0-9_-]{12}$/.test(c.id)) fail('id de candidato');
-  }
-  if (m.currentOfficeId && !m.offices?.[m.currentOfficeId]) fail('cargo atual');
-}
-
-/**
- * Converte um arquivo exportado em dados prontos para gravar no banco.
- * Aceita exportações v3 (Firebase) e v1/v2 (versões anteriores com servidor Node),
- * verificando o selo SHA-256 de cada resultado encerrado.
- */
-export async function parseImport(doc) {
-  if (!isObj(doc) || doc.format !== EXPORT_FORMAT) fail('não é uma exportação Nomeia');
-  if (doc.schemaVersion === SCHEMA_VERSION) {
-    const m = doc.meeting;
-    validateMeetingV3(m);
-    const results = isObj(doc.results) ? doc.results : {};
-    for (const o of officeList(m)) {
-      if (o.status !== 'closed') continue;
-      const r = results[o.id];
-      if (!r) fail(`resultado do cargo ${o.id} ausente`);
-      if (r.hashVersion === 3 && (await resultHash(m.id, o, r.result)) !== r.resultHash) fail(`selo do cargo ${o.id} não confere`);
-    }
-    return { meeting: m, results, counts: doc.counts || {}, tallies: doc.tallies || {}, log: doc.log || {} };
-  }
-  if (doc.schemaVersion === 1 || doc.schemaVersion === 2) return convertLegacy(doc.meeting);
-  fail('versão de esquema não suportada');
-}
-
-/** Exportação/backup do servidor Node (v1/v2) → estrutura do Firebase (v3). */
-async function convertLegacy(old) {
-  if (!isObj(old) || !Array.isArray(old.offices)) fail('reunião antiga');
-  const ms = (v) => (v ? Date.parse(v) : undefined);
-  const offices = {};
-  const results = {};
-  const tallies = {};
-  const counts = {};
-  for (const o of old.offices) {
-    if (o.status === 'closed') {
-      const legacyHash = await sha256Hex(
-        canonical({ meetingId: old.id, officeId: o.id, title: o.title, openedAt: o.openedAt, closedAt: o.closedAt, result: o.result }),
-      );
-      if (legacyHash !== o.resultHash) fail(`selo do cargo ${o.id} não confere`);
-      results[o.id] = { result: o.result, resultHash: o.resultHash, hashVersion: 2 };
-    }
-    const t = { ...(o.tally?.byCandidate || {}) };
-    if (o.tally?.abstain) t[ABSTAIN] = o.tally.abstain;
-    const total = Object.values(t).reduce((a, n) => a + n, 0);
-    if (total) {
-      tallies[o.id] = t;
-      counts[o.id] = total;
-    }
-    const candidates = {};
-    o.candidates.forEach((c, i) => {
-      candidates[c.id] = { id: c.id, name: c.name, order: i, createdAt: ms(c.createdAt) };
-    });
-    offices[o.id] = JSON.parse(
-      JSON.stringify({
-        id: o.id,
-        title: o.title,
-        description: o.description || '',
-        status: o.status,
-        resultsMode: o.resultsMode,
-        resultsPublished: o.resultsPublished,
-        createdAt: ms(o.createdAt),
-        updatedAt: ms(o.updatedAt),
-        startedAt: ms(o.startedAt),
-        openedAt: ms(o.openedAt),
-        closedAt: ms(o.closedAt),
-        publishedAt: ms(o.publishedAt),
-        candidates,
-      }),
-    );
-  }
-  const meeting = JSON.parse(
-    JSON.stringify({
-      id: old.id,
-      name: old.name,
-      status: old.status,
-      expectedParticipants: old.expectedParticipants,
-      createdAt: ms(old.createdAt),
-      updatedAt: ms(old.updatedAt),
-      archivedAt: ms(old.archivedAt),
-      schemaVersion: SCHEMA_VERSION,
-      currentOfficeId: old.currentOfficeId || undefined,
-      offices,
-    }),
-  );
-  validateMeetingV3(meeting);
-  return { meeting, results, counts, tallies, log: {} };
 }

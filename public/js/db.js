@@ -1,6 +1,13 @@
 // NOMEIA — acesso ao Firebase Realtime Database (fonte compartilhada, em tempo real).
 // O SDK oficial é carregado do CDN do Google. Nenhuma regra de permissão vive aqui:
 // as validações deste arquivo melhoram a experiência, mas quem decide é database.rules.json.
+//
+// Estrutura no banco:
+//   current                         reunião em andamento (as telas públicas seguem este ponteiro)
+//   meetings/{m}                    reunião, cargos e candidatos
+//   counts/{m}/{o}                  cédulas registradas
+//   tallies/{m}/{o}/{c|abstain}     votos por candidato e abstenções
+//   receipts/{m}/{o}/{id}           uma marca por confirmação (evita contar reenvio duas vezes)
 
 import { firebaseConfig, emulator } from './firebase-config.js';
 import * as D from './domain.js';
@@ -18,15 +25,14 @@ export class DataError extends Error {
   }
 }
 
-const NOT_CONFIGURED = 'O Firebase ainda não foi configurado nesta publicação (js/firebase-config.js).';
-const OFFLINE = 'Sem conexão com o serviço de votação. Verifique a internet/Wi-Fi e tente novamente.';
+const OFFLINE = 'Sem conexão. Verifique a internet e tente novamente.';
 
 let loading = null;
 let connected = false;
 
 /** Carrega o SDK e inicializa o app uma única vez. */
 function load() {
-  if (!configured) return Promise.reject(new DataError('not_configured', NOT_CONFIGURED));
+  if (!configured) return Promise.reject(new DataError('not_configured', 'Firebase não configurado (js/firebase-config.js).'));
   loading ??= (async () => {
     let appM, d, a;
     try {
@@ -52,7 +58,6 @@ function load() {
 
 const isDenied = (e) => /PERMISSION[_ ]DENIED/i.test(`${e?.code || ''} ${e?.message || ''}`);
 
-/** Traduz erros do SDK em mensagens para a interface. */
 function translate(e) {
   if (e instanceof DataError || e instanceof D.DomainError) return e;
   if (isDenied(e)) return new DataError('permission_denied', 'Operação recusada pelas regras de segurança do banco.');
@@ -87,7 +92,7 @@ async function read(path) {
   }
 }
 
-// ---------------- Conexão ----------------
+// ---------------- Tempo real ----------------
 
 /** Estado da conexão com o Firebase: 'connecting' | 'online' | 'offline'. */
 export async function watchConnection(cb) {
@@ -100,42 +105,23 @@ export async function watchConnection(cb) {
   });
 }
 
-// ---------------- Leitura pública ----------------
-
-export async function listMeetings({ includeArchived = false } = {}) {
-  const all = Object.values((await read('meetings')) || {});
-  return all
-    .filter((m) => includeArchived || m.status === 'active')
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-    .map((m) => ({ id: m.id, name: m.name, status: m.status, phase: D.phase(m), createdAt: m.createdAt, offices: Object.keys(m.offices || {}).length }));
-}
-
-function eventOf(prev, next) {
-  if (!prev) return 'snapshot';
-  if (prev.status !== next.status && next.status === 'archived') return 'meeting_closed';
-  const p = prev.currentOffice;
-  const n = next.currentOffice;
-  if (p?.id !== n?.id) return p ? 'next_office' : 'office_updated';
-  if (!n) return 'meeting_updated';
-  if (p.status !== n.status) return n.status === 'voting_open' ? 'vote_opened' : n.status === 'closed' ? 'vote_closed' : 'office_updated';
-  if (!p.resultsPublished && n.resultsPublished) return 'results_published';
-  if (JSON.stringify(p.candidates) !== JSON.stringify(n.candidates)) return 'candidates_updated';
-  if (p.turnout.votes !== n.turnout.votes) return 'vote_accepted';
-  return 'meeting_updated';
+/** Acompanha qual reunião está em andamento (id ou null). */
+export async function watchCurrent(cb) {
+  const { d, db } = await load();
+  return d.onValue(d.ref(db, 'current'), (s) => cb(s.val() || null));
 }
 
 /**
- * Acompanha uma reunião em tempo real. Monta o mesmo formato de estado usado pelas telas.
- * Público: lê a reunião e o total de votos; a apuração por candidato só quando liberada.
- * Administrador: lê também a apuração parcial e os resultados selados de todos os cargos.
+ * Acompanha uma reunião em tempo real e entrega um estado pronto para as telas.
+ * Público: reunião + total de cédulas; votos por candidato só com resultado liberado
+ * (ao vivo, se o administrador permitir, ou após o encerramento).
+ * Administrador: lê também a apuração parcial de todos os cargos.
  */
 export async function watchMeeting(meetingId, { admin = false } = {}, onState, onError = () => {}) {
   const { d, db } = await load();
   let meeting = null;
   let counts = {};
   const tallies = {};
-  const results = {};
-  let last = null;
   const subs = new Map();
 
   const sub = (path, onData) => {
@@ -144,102 +130,72 @@ export async function watchMeeting(meetingId, { admin = false } = {}, onState, o
       d.ref(db, path),
       (s) => onData(s.val()),
       () => {
-        // Leitura revogada pelas regras (ex.: modo ao vivo desligado): apenas deixa de acompanhar.
+        // Leitura revogada pelas regras (ex.: parcial ao vivo desligada): deixa de acompanhar.
         subs.delete(path);
         onData(undefined, true);
       },
     );
     subs.set(path, stop);
   };
-  const unsub = (path) => {
-    subs.get(path)?.();
-    subs.delete(path);
-  };
 
   function view(o) {
-    const candidates = D.candidateList(o);
-    const sealed = results[o.id];
-    const t = admin ? tallies[o.id] || {} : tallies[o.id];
-    const present = meeting.expectedParticipants;
-    const live = o.status === 'voting_open' && t !== undefined ? D.computeResult(candidates, t, present) : null;
+    const visible = admin || o.status === 'closed' || (o.status === 'voting_open' && o.liveResults === true);
+    const t = tallies[o.id];
+    const result = t !== undefined || (admin && o.status !== 'draft') ? D.computeResult(o, t, counts[o.id], meeting.expectedParticipants) : null;
     return {
       id: o.id,
       title: o.title,
-      description: o.description || '',
+      voteType: o.voteType,
+      maxChoices: D.maxChoicesOf(o),
       status: o.status,
-      resultsMode: o.resultsMode,
-      resultsPublished: Boolean(o.resultsPublished),
+      liveResults: o.liveResults === true,
       createdAt: o.createdAt,
-      updatedAt: o.updatedAt,
-      startedAt: o.startedAt,
+      presentedAt: o.presentedAt,
       openedAt: o.openedAt,
       closedAt: o.closedAt,
-      publishedAt: o.publishedAt,
-      candidates,
-      turnout: { present, votes: counts[o.id] || 0 },
-      live,
-      result: sealed?.result || null,
-      resultHash: sealed?.resultHash || null,
-      results: o.status === 'closed' ? (o.resultsPublished && sealed ? sealed.result : null) : o.resultsMode === 'live' ? live : null,
+      candidates: D.candidateList(o),
+      ballots: counts[o.id] || 0,
+      result: visible ? result : null,
     };
   }
 
   function emit() {
     if (!meeting) return;
     const offices = D.officeList(meeting).map(view);
-    const cur = offices.find((o) => o.id === meeting.currentOfficeId && o.status !== 'draft') || null;
-    const state = {
+    onState({
       id: meeting.id,
       name: meeting.name,
-      status: meeting.status,
-      phase: D.phase(meeting),
       expectedParticipants: meeting.expectedParticipants,
       createdAt: meeting.createdAt,
-      updatedAt: meeting.updatedAt,
-      archivedAt: meeting.archivedAt,
-      currentOfficeId: meeting.currentOfficeId || null,
       offices,
-      currentOffice: cur,
-      history: offices
-        .filter((o) => o.status === 'closed')
-        .map((o) => ({ id: o.id, title: o.title, closedAt: o.closedAt, resultsPublished: o.resultsPublished, results: o.resultsPublished ? o.result : null })),
-    };
-    const type = eventOf(last, state);
-    last = state;
-    onState(state, type);
+      // Cargo em preparação não aparece nas telas públicas até "Apresentar".
+      currentOffice: offices.find((o) => o.id === meeting.currentOfficeId && (admin || o.status !== 'draft')) || null,
+    });
   }
 
-  /** Público: acompanha apenas o que as regras liberam (parcial ao vivo, resultados publicados). */
-  function syncPublicSubs() {
+  /** Público: acompanha a apuração apenas dos cargos em que as regras a liberam. */
+  function syncPublicTallies() {
     for (const o of D.officeList(meeting)) {
-      const tPath = `tallies/${meetingId}/${o.id}`;
-      const rPath = `results/${meetingId}/${o.id}`;
-      const wantLive = o.status === 'voting_open' && o.resultsMode === 'live';
-      if (wantLive) {
-        sub(tPath, (v, denied) => {
+      const path = `tallies/${meetingId}/${o.id}`;
+      const visible = o.status === 'closed' || (o.status === 'voting_open' && o.liveResults === true);
+      if (visible) {
+        sub(path, (v, denied) => {
           if (denied) delete tallies[o.id];
           else tallies[o.id] = v || {};
           emit();
         });
-      } else if (subs.has(tPath)) {
-        unsub(tPath);
+      } else if (subs.has(path)) {
+        subs.get(path)();
+        subs.delete(path);
         delete tallies[o.id];
-      }
-      if (o.status === 'closed' && o.resultsPublished) {
-        sub(rPath, (v, denied) => {
-          if (denied || !v) delete results[o.id];
-          else results[o.id] = v;
-          emit();
-        });
       }
     }
   }
 
   sub(`meetings/${meetingId}`, (v, denied) => {
-    if (denied) return onError('denied');
-    if (!v) return onError('not_found');
+    if (denied || !v) return onError(denied ? 'denied' : 'not_found');
     meeting = v;
-    if (!admin) syncPublicSubs();
+    if (!admin) syncPublicTallies();
     emit();
   });
   sub(`counts/${meetingId}`, (v) => {
@@ -253,12 +209,6 @@ export async function watchMeeting(meetingId, { admin = false } = {}, onState, o
       Object.assign(tallies, v || {});
       emit();
     });
-    sub(`results/${meetingId}`, (v, denied) => {
-      if (denied) return onError('denied');
-      for (const k of Object.keys(results)) delete results[k];
-      Object.assign(results, v || {});
-      emit();
-    });
   }
   return () => {
     for (const stop of subs.values()) stop();
@@ -269,23 +219,23 @@ export async function watchMeeting(meetingId, { admin = false } = {}, onState, o
 // ---------------- Voto público ----------------
 
 /**
- * Registra UM voto: recibo de criação única + contador da opção (+1) + total (+1),
- * numa única atualização atômica. As regras do banco recusam a operação inteira se a
- * votação não estiver aberta, se a opção for inválida ou se o recibo já existir
- * (retransmissão da mesma confirmação). Nunca envia votos enquanto offline.
+ * Registra UMA cédula numa única atualização atômica: marca de confirmação (criação única),
+ * +1 para cada nome escolhido (ou +1 abstenção) e +1 no total de cédulas.
+ * As regras recusam a operação inteira se a votação não estiver aberta, se algum nome
+ * não existir ou se a marca já existir (reenvio da mesma confirmação).
+ * Nunca envia votos enquanto offline.
  */
-export async function castVote(meetingId, officeId, choice, requestId) {
-  if (!D.REQUEST_ID_RE.test(requestId)) throw new DataError('invalid_input', 'Voto inválido.');
+export async function castBallot(meetingId, officeId, choices, requestId) {
+  if (!D.REQUEST_ID_RE.test(requestId) || !choices.length) throw new DataError('invalid_input', 'Voto inválido.');
   const { d, db } = await load();
   if (!connected) throw new DataError('network_error', OFFLINE);
+  const upd = {
+    [`receipts/${meetingId}/${officeId}/${requestId}`]: d.serverTimestamp(),
+    [`counts/${meetingId}/${officeId}`]: d.increment(1),
+  };
+  for (const c of choices) upd[`tallies/${meetingId}/${officeId}/${c}`] = d.increment(1);
   try {
-    await withTimeout(
-      d.update(d.ref(db), {
-        [`receipts/${meetingId}/${officeId}/${requestId}`]: d.serverTimestamp(),
-        [`tallies/${meetingId}/${officeId}/${choice}`]: d.increment(1),
-        [`counts/${meetingId}/${officeId}`]: d.increment(1),
-      }),
-    );
+    await withTimeout(d.update(d.ref(db), upd));
   } catch (e) {
     if (isDenied(e)) throw new DataError('rejected', 'O voto não foi aceito: a votação pode ter sido encerrada.');
     throw translate(e);
@@ -328,208 +278,130 @@ export async function signOut() {
 
 const ts = (d) => d.serverTimestamp();
 
-async function requireMeeting(meetingId) {
-  const m = await read(`meetings/${meetingId}`);
-  if (!m) throw new DataError('not_found', 'Reunião não encontrada.');
-  if (m.status !== 'active') throw new DataError('meeting_archived', 'Reunião encerrada: disponível apenas para leitura.');
-  return m;
+export async function listMeetings() {
+  return Object.values((await read('meetings')) || {})
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .map((m) => ({ id: m.id, name: m.name, createdAt: m.createdAt, offices: Object.keys(m.offices || {}).length }));
 }
 
-function requireOffice(m, officeId) {
-  const o = m.offices?.[officeId];
-  if (!o) throw new DataError('not_found', 'Cargo não encontrado.');
-  return o;
-}
-
-async function appendLog(meetingId, entry) {
-  await write(({ d, db }) => d.set(d.push(d.ref(db, `log/${meetingId}`)), { ...entry, at: ts(d) }));
-}
-
+/** Cria a reunião e a torna a reunião em andamento (telas públicas mudam sozinhas). */
 export async function createMeeting({ name, expectedParticipants }) {
   const id = D.newId('m');
   const meeting = {
     id,
     name: D.cleanText(name, 'Nome da reunião'),
-    status: 'active',
-    expectedParticipants: D.cleanInt(expectedParticipants, 'Pessoas presentes', 1, D.LIMITS.expectedMax),
-    schemaVersion: D.SCHEMA_VERSION,
+    expectedParticipants: D.cleanInt(expectedParticipants, 'Pessoas presentes', 1, D.LIMITS.presentMax),
   };
-  await write(({ d, db }) => d.set(d.ref(db, `meetings/${id}`), { ...meeting, createdAt: ts(d), updatedAt: ts(d) }));
+  await write(({ d, db }) => d.update(d.ref(db), { [`meetings/${id}`]: { ...meeting, createdAt: ts(d) }, current: id }));
   return id;
 }
 
-export async function updateMeeting(meetingId, { name, expectedParticipants }) {
-  await requireMeeting(meetingId);
-  const patch = {
-    name: D.cleanText(name, 'Nome'),
-    expectedParticipants: D.cleanInt(expectedParticipants, 'Pessoas presentes', 1, D.LIMITS.expectedMax),
-  };
-  await write(({ d, db }) => d.update(d.ref(db, `meetings/${meetingId}`), { ...patch, updatedAt: ts(d) }));
+/** Retoma uma reunião existente como a reunião em andamento. */
+export async function setCurrentMeeting(meetingId) {
+  await write(({ d, db }) => d.set(d.ref(db, 'current'), meetingId));
 }
 
-export async function createOffice(meetingId, { title, description, resultsMode, start = true }) {
-  const m = await requireMeeting(meetingId);
-  if (Object.keys(m.offices || {}).length >= D.LIMITS.officesPerMeeting) throw new DataError('limit', 'Limite de cargos atingido.');
+export async function setPresent(meetingId, expectedParticipants) {
+  const n = D.cleanInt(expectedParticipants, 'Pessoas presentes', 1, D.LIMITS.presentMax);
+  await write(({ d, db }) => d.set(d.ref(db, `meetings/${meetingId}/expectedParticipants`), n));
+}
+
+async function requireOffice(meetingId, officeId) {
+  const o = await read(`meetings/${meetingId}/offices/${officeId}`);
+  if (!o) throw new DataError('not_found', 'Cargo não encontrado.');
+  return o;
+}
+
+/** Cria o cargo em preparação: só aparece nas telas públicas depois de "Apresentar". */
+export async function createOffice(meetingId, { title, voteType, maxChoices }) {
+  const m = await read(`meetings/${meetingId}`);
+  if (!m) throw new DataError('not_found', 'Reunião não encontrada.');
   const act = D.activeOffice(m);
-  if (start && act) throw new DataError('office_in_progress', `O cargo "${act.title}" ainda está em andamento.`);
-  if (!D.RESULTS_MODES.includes(resultsMode || 'on_publish')) throw new DataError('invalid_input', 'Modo de resultados inválido.');
+  if (act) throw new DataError('office_in_progress', `Encerre o cargo "${act.title}" antes de criar outro.`);
+  if (!D.VOTE_TYPES.includes(voteType)) throw new DataError('invalid_input', 'Tipo de votação inválido.');
   const id = D.newId('o');
   const office = {
     id,
     title: D.cleanText(title, 'Nome do cargo'),
-    description: D.cleanText(description, 'Descrição', { optional: true, max: D.LIMITS.descriptionMax }),
-    status: start ? 'discussing' : 'draft',
-    resultsMode: resultsMode || 'on_publish',
-    resultsPublished: false,
+    voteType,
+    maxChoices: voteType === 'multiple' ? D.cleanInt(maxChoices, 'Máximo de escolhas', 2, D.LIMITS.candidatesPerOffice) : 1,
+    status: 'draft',
+    liveResults: false,
   };
-  await write(({ d, db }) => {
-    const now = ts(d);
-    const upd = { [`offices/${id}`]: { ...office, createdAt: now, updatedAt: now, ...(start ? { startedAt: now } : {}) }, updatedAt: now };
-    if (start) upd.currentOfficeId = id;
-    return d.update(d.ref(db, `meetings/${meetingId}`), upd);
-  });
+  await write(({ d, db }) => d.update(d.ref(db, `meetings/${meetingId}`), { [`offices/${id}`]: { ...office, createdAt: ts(d) }, currentOfficeId: id }));
   return id;
 }
 
 function assertEditable(o) {
-  if (o.status === 'closed') throw new DataError('office_closed', 'Cargo encerrado: resultados são imutáveis.');
-  if (o.status === 'voting_open') throw new DataError('voting_in_progress', 'Não é possível alterar candidatos durante a votação.');
+  if (o.status !== 'draft' && o.status !== 'discussing') throw new DataError('locked', 'A lista de nomes não pode mudar depois que a votação é aberta.');
 }
 
 export async function addCandidate(meetingId, officeId, name) {
-  const m = await requireMeeting(meetingId);
-  const o = requireOffice(m, officeId);
+  const o = await requireOffice(meetingId, officeId);
   assertEditable(o);
   const list = Object.values(o.candidates || {});
   const clean = D.cleanText(name, 'Nome');
-  if (list.length >= D.LIMITS.candidatesPerOffice) throw new DataError('limit', 'Limite de candidatos atingido.');
-  if (list.some((c) => D.sameName(c.name, clean))) throw new DataError('duplicate_candidate', 'Este nome já está na lista deste cargo.');
+  if (list.length >= D.LIMITS.candidatesPerOffice) throw new DataError('limit', 'Limite de nomes atingido.');
+  if (list.some((c) => D.sameName(c.name, clean))) throw new DataError('duplicate_candidate', 'Este nome já está na lista.');
   const id = D.newId('c');
   const order = list.reduce((max, c) => Math.max(max, c.order), -1) + 1;
-  await write(({ d, db }) =>
-    d.update(d.ref(db, `meetings/${meetingId}`), {
-      [`offices/${officeId}/candidates/${id}`]: { id, name: clean, order, createdAt: ts(d) },
-      [`offices/${officeId}/updatedAt`]: ts(d),
-      updatedAt: ts(d),
-    }),
-  );
+  await write(({ d, db }) => d.set(d.ref(db, `meetings/${meetingId}/offices/${officeId}/candidates/${id}`), { id, name: clean, order }));
 }
 
 export async function renameCandidate(meetingId, officeId, candidateId, name) {
-  const m = await requireMeeting(meetingId);
-  const o = requireOffice(m, officeId);
+  const o = await requireOffice(meetingId, officeId);
   assertEditable(o);
   const clean = D.cleanText(name, 'Nome');
   if (Object.values(o.candidates || {}).some((c) => c.id !== candidateId && D.sameName(c.name, clean))) {
-    throw new DataError('duplicate_candidate', 'Este nome já está na lista deste cargo.');
+    throw new DataError('duplicate_candidate', 'Este nome já está na lista.');
   }
-  await write(({ d, db }) =>
-    d.update(d.ref(db, `meetings/${meetingId}`), { [`offices/${officeId}/candidates/${candidateId}/name`]: clean, [`offices/${officeId}/updatedAt`]: ts(d) }),
-  );
+  await write(({ d, db }) => d.set(d.ref(db, `meetings/${meetingId}/offices/${officeId}/candidates/${candidateId}/name`), clean));
 }
 
 export async function removeCandidate(meetingId, officeId, candidateId) {
-  const m = await requireMeeting(meetingId);
-  assertEditable(requireOffice(m, officeId));
-  await write(({ d, db }) =>
-    d.update(d.ref(db, `meetings/${meetingId}`), { [`offices/${officeId}/candidates/${candidateId}`]: null, [`offices/${officeId}/updatedAt`]: ts(d) }),
-  );
+  assertEditable(await requireOffice(meetingId, officeId));
+  await write(({ d, db }) => d.remove(d.ref(db, `meetings/${meetingId}/offices/${officeId}/candidates/${candidateId}`)));
 }
 
-export async function setResultsMode(meetingId, officeId, mode) {
-  const m = await requireMeeting(meetingId);
-  if (requireOffice(m, officeId).status === 'closed') throw new DataError('office_closed', 'Cargo encerrado: resultados são imutáveis.');
-  if (!D.RESULTS_MODES.includes(mode)) throw new DataError('invalid_input', 'Modo de resultados inválido.');
-  await write(({ d, db }) => d.update(d.ref(db, `meetings/${meetingId}/offices/${officeId}`), { resultsMode: mode, updatedAt: ts(d) }));
+const officeRef = (d, db, meetingId, officeId) => d.ref(db, `meetings/${meetingId}/offices/${officeId}`);
+
+/** Mostra o cargo e os nomes na apresentação e nos celulares (votação ainda fechada). */
+export async function presentOffice(meetingId, officeId) {
+  const o = await requireOffice(meetingId, officeId);
+  if (o.status !== 'draft') throw new DataError('invalid_state', 'Este cargo já foi apresentado.');
+  await write(({ d, db }) => d.update(officeRef(d, db, meetingId, officeId), { status: 'discussing', presentedAt: ts(d) }));
 }
 
 export async function openVoting(meetingId, officeId) {
-  const m = await requireMeeting(meetingId);
-  const o = requireOffice(m, officeId);
-  if (o.status !== 'discussing') throw new DataError('invalid_state', 'Só é possível abrir a votação de um cargo em discussão.');
-  if (!Object.keys(o.candidates || {}).length) throw new DataError('no_candidates', 'Adicione ao menos um nome antes de abrir a votação.');
-  await write(({ d, db }) => d.update(d.ref(db, `meetings/${meetingId}/offices/${officeId}`), { status: 'voting_open', openedAt: ts(d), updatedAt: ts(d) }));
+  const o = await requireOffice(meetingId, officeId);
+  if (o.status !== 'discussing') throw new DataError('invalid_state', 'Apresente o cargo antes de abrir a votação.');
+  const n = Object.keys(o.candidates || {}).length;
+  if (!n) throw new DataError('no_candidates', 'Adicione ao menos um nome antes de abrir a votação.');
+  if (o.voteType === 'multiple' && o.maxChoices > n) {
+    throw new DataError('invalid_state', `O máximo de escolhas (${o.maxChoices}) é maior que a quantidade de nomes (${n}).`);
+  }
+  await write(({ d, db }) => d.update(officeRef(d, db, meetingId, officeId), { status: 'voting_open', openedAt: ts(d) }));
+}
+
+/** Liga/desliga o resultado parcial ao vivo na apresentação e nos celulares. */
+export async function setLiveResults(meetingId, officeId, on) {
+  await write(({ d, db }) => d.set(d.ref(db, `meetings/${meetingId}/offices/${officeId}/liveResults`), Boolean(on)));
 }
 
 /**
- * Encerra a votação e sela o resultado:
- * 1) muda o estado para "encerrada" — a partir daí as regras recusam qualquer voto;
- * 2) lê os contadores finais e calcula a apuração;
- * 3) grava o resultado com selo SHA-256 (gravação única, imutável pelas regras).
+ * Encerra a votação. A partir daí as regras recusam votos e qualquer alteração do cargo:
+ * contadores e nomes ficam definitivos e o resultado passa a ser público.
  */
 export async function closeVoting(meetingId, officeId) {
-  const m = await requireMeeting(meetingId);
-  const o = requireOffice(m, officeId);
-  if (o.status === 'closed') throw new DataError('office_closed', 'Esta votação já foi encerrada.');
-  if (o.status !== 'voting_open') throw new DataError('voting_not_open', 'A votação deste cargo não está aberta.');
-  await write(({ d, db }) => d.update(d.ref(db, `meetings/${meetingId}/offices/${officeId}`), { status: 'closed', closedAt: ts(d), updatedAt: ts(d) }));
-  return sealResult(meetingId, officeId);
+  const o = await requireOffice(meetingId, officeId);
+  if (o.status !== 'voting_open') throw new DataError('invalid_state', 'A votação deste cargo não está aberta.');
+  await write(({ d, db }) => d.update(officeRef(d, db, meetingId, officeId), { status: 'closed', closedAt: ts(d) }));
 }
-
-/** Calcula e grava o resultado de um cargo encerrado (idempotente: só grava se ainda não existir). */
-export async function sealResult(meetingId, officeId) {
-  const m = await read(`meetings/${meetingId}`);
-  const o = requireOffice(m, officeId);
-  if (o.status !== 'closed') throw new DataError('invalid_state', 'O cargo ainda não foi encerrado.');
-  const existing = await read(`results/${meetingId}/${officeId}`);
-  if (existing) return existing;
-  const tallies = (await read(`tallies/${meetingId}/${officeId}`)) || {};
-  const result = D.computeResult(D.candidateList(o), tallies, m.expectedParticipants);
-  const resultHash = await D.resultHash(meetingId, o, result);
-  await write(({ d, db }) => d.set(d.ref(db, `results/${meetingId}/${officeId}`), { result, resultHash, hashVersion: 3, sealedAt: ts(d) }));
-  if (o.resultsMode !== 'on_publish') {
-    await write(({ d, db }) => d.update(d.ref(db, `meetings/${meetingId}/offices/${officeId}`), { resultsPublished: true, publishedAt: ts(d) }));
-  }
-  await appendLog(meetingId, { type: 'office_closed', officeId, title: o.title, resultHash });
-  return { result, resultHash };
-}
-
-export async function publishResults(meetingId, officeId) {
-  const m = await requireMeeting(meetingId);
-  const o = requireOffice(m, officeId);
-  if (o.status !== 'closed') throw new DataError('invalid_state', 'Encerre a votação antes de publicar.');
-  if (o.resultsPublished) throw new DataError('already_published', 'Resultados já publicados.');
-  await write(({ d, db }) => d.update(d.ref(db, `meetings/${meetingId}/offices/${officeId}`), { resultsPublished: true, publishedAt: ts(d) }));
-  await appendLog(meetingId, { type: 'results_published', officeId });
-}
-
-export async function archiveMeeting(meetingId) {
-  const m = await requireMeeting(meetingId);
-  if (D.officeList(m).some((o) => o.status === 'voting_open')) {
-    throw new DataError('voting_in_progress', 'Encerre a votação em andamento antes de encerrar a reunião.');
-  }
-  await write(({ d, db }) => d.update(d.ref(db, `meetings/${meetingId}`), { status: 'archived', archivedAt: ts(d), updatedAt: ts(d) }));
-  await appendLog(meetingId, { type: 'meeting_archived' });
-}
-
-// ---------------- Exportação / importação ----------------
 
 export async function exportMeeting(meetingId) {
-  const [meeting, results, counts, tallies, log] = await Promise.all(
-    ['meetings', 'results', 'counts', 'tallies', 'log'].map((root) => read(`${root}/${meetingId}`)),
-  );
+  const [meeting, counts, tallies] = await Promise.all(['meetings', 'counts', 'tallies'].map((root) => read(`${root}/${meetingId}`)));
   if (!meeting) throw new DataError('not_found', 'Reunião não encontrada.');
-  return D.exportDoc({ meeting, results, counts, tallies, log });
-}
-
-/**
- * Importa uma exportação (v3) ou um backup das versões anteriores (v1/v2, servidor Node).
- * Restaura reunião, cargos, candidatos, resultados selados e registro. Os contadores de
- * votações ainda abertas no momento da exportação não podem ser restaurados (as regras só
- * permitem somar votos reais), por isso essas votações voltam sem votos parciais.
- * Nunca sobrescreve uma reunião existente.
- */
-export async function importMeeting(doc) {
-  const parsed = await D.parseImport(doc);
-  const id = parsed.meeting.id;
-  if (await read(`meetings/${id}`)) throw new DataError('meeting_exists', 'Já existe uma reunião com este ID. Importação recusada para não sobrescrever resultados.');
-  const upd = { [`meetings/${id}`]: parsed.meeting };
-  for (const [oid, r] of Object.entries(parsed.results)) upd[`results/${id}/${oid}`] = r;
-  for (const [eid, e] of Object.entries(parsed.log || {})) upd[`log/${id}/${eid}`] = e;
-  await write(({ d, db }) => d.update(d.ref(db), upd));
-  await appendLog(id, { type: 'imported' });
-  const openWithVotes = D.officeList(parsed.meeting).filter((o) => o.status === 'voting_open' && parsed.counts?.[o.id]);
-  return { id, name: parsed.meeting.name, droppedOpenVotes: openWithVotes.length };
+  return D.exportDoc({ meeting, counts, tallies });
 }
 
 // ---------------- QR Code (gerado no navegador) ----------------
@@ -542,7 +414,5 @@ export async function qrDataUrl(text) {
   return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
 }
 
-/** Endereços públicos baseados no local onde o app está publicado (ex.: GitHub Pages). */
-export function pageUrl(page, meetingId) {
-  return new URL(`${page}?m=${encodeURIComponent(meetingId)}`, location.href).href;
-}
+/** Endereço público de uma página, relativo ao local publicado (ex.: GitHub Pages). */
+export const pageUrl = (page) => new URL(page, location.href).href;
