@@ -10,7 +10,16 @@
 //
 // Enquanto ficar null, as páginas mostram "Firebase não configurado" (nada é simulado).
 
-export const firebaseConfig = null;
+export const firebaseConfig = {
+  apiKey: 'AIzaSyD0-y3cCLCousVz9x8ryEmSsGMob0f-p0',
+  authDomain: 'nomeacao-905ed.firebaseapp.com',
+  databaseURL: 'https://nomeacao-905ed-default-rtdb.firebaseio.com',
+  projectId: 'nomeacao-905ed',
+  storageBucket: 'nomeacao-905ed.firebasestorage.app',
+  messagingSenderId: '602299090193',
+  appId: '1:602299090193:web:c59cd84bbc5e9a7b0838b0',
+  measurementId: 'G-C4PKYH5DSC',
+};
 
 /* Exemplo (substitua pelos valores do seu projeto):
 export const firebaseConfig = {

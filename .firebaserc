@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "demo-nomeia"
-  }
+    "default": "nomeacao-905ed"
+  },
+  "targets": {},
+  "etags": {}
 }
