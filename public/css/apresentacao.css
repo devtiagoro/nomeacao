@@ -1,0 +1,483 @@
+/* NOMEIA — Apresentação para telão/projetor.
+   Tema escuro azul-petróleo fixo (alto contraste, legível à distância). */
+
+:root.theme-stage {
+  --bg: #052029;
+  --surface: rgba(255, 255, 255, 0.055);
+  --surface-2: rgba(255, 255, 255, 0.07);
+  --surface-3: rgba(255, 255, 255, 0.12);
+  --border: rgba(255, 255, 255, 0.14);
+  --border-strong: rgba(255, 255, 255, 0.24);
+  --text: #ffffff;
+  --text-2: #e3eef1;
+  --text-muted: #a8c3ca;
+  --text-faint: #86a6ae;
+  --primary: #4cc1b2;
+  --primary-hover: #6fd3c6;
+  --primary-ink: #04161b;
+  --primary-soft: rgba(76, 193, 178, 0.16);
+  --primary-soft-ink: #a8ebe2;
+  --accent: #7fdccf;
+  --accent-soft: rgba(76, 193, 178, 0.18);
+  --success: #7fdccf;
+  --success-soft: rgba(76, 193, 178, 0.18);
+  --warn: #ffd27a;
+  --warn-soft: rgba(255, 196, 77, 0.16);
+  --danger: #ff9b92;
+  --danger-soft: rgba(255, 120, 110, 0.16);
+  color-scheme: dark;
+
+  /* Escala tipográfica relativa à tela */
+  --stage-title: clamp(2.4rem, 4.6vw, 5.4rem);
+  --stage-name: clamp(1.35rem, 2.15vw, 2.6rem);
+  --stage-body: clamp(1rem, 1.25vw, 1.6rem);
+  --stage-small: clamp(0.85rem, 0.95vw, 1.15rem);
+  --stage-stat: clamp(2.4rem, 4.2vw, 5rem);
+}
+
+.page-stage {
+  background:
+    radial-gradient(1200px 700px at 85% -10%, rgba(42, 157, 143, 0.22), transparent 60%),
+    radial-gradient(900px 600px at -10% 110%, rgba(21, 94, 111, 0.45), transparent 60%),
+    var(--bg);
+  overflow-x: hidden;
+}
+
+.stage {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+/* Cabeçalho */
+.stage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: clamp(14px, 1.6vw, 28px) clamp(20px, 3vw, 56px);
+  border-bottom: 1px solid var(--border);
+}
+
+.stage-brand {
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 1vw, 16px);
+  min-width: 0;
+}
+
+.stage-brand .brand-mark {
+  width: clamp(30px, 2.4vw, 44px);
+  height: clamp(30px, 2.4vw, 44px);
+  background: var(--primary);
+  color: var(--primary-ink);
+}
+
+.stage-brand-name {
+  font-weight: 700;
+  font-size: var(--stage-body);
+  letter-spacing: -0.01em;
+}
+
+.stage-sep {
+  width: 1px;
+  height: 1.6em;
+  background: var(--border-strong);
+}
+
+.stage-meeting {
+  font-size: var(--stage-body);
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stage-header .chip {
+  height: clamp(26px, 2vw, 36px);
+  padding: 0 clamp(10px, 0.9vw, 16px);
+  font-size: var(--stage-small);
+}
+
+.stage-btn {
+  --btn-bg: transparent;
+  --btn-border: var(--border-strong);
+  --btn-hover: var(--surface-3);
+  --btn-fg: var(--text-2);
+}
+
+/* Conteúdo */
+.stage-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.75fr) minmax(300px, 1fr);
+  gap: clamp(24px, 3vw, 64px);
+  padding: clamp(24px, 3vw, 64px) clamp(20px, 3vw, 56px);
+  align-items: start;
+}
+
+.stage-content {
+  min-width: 0;
+  display: grid;
+  gap: clamp(12px, 1.4vw, 24px);
+  align-content: start;
+}
+
+.stage-kicker:empty {
+  display: none;
+}
+
+.stage-kicker .chip {
+  height: clamp(30px, 2.3vw, 42px);
+  padding: 0 clamp(12px, 1vw, 18px);
+  font-size: var(--stage-small);
+  letter-spacing: 0.02em;
+}
+
+.stage-title {
+  font-size: var(--stage-title);
+  font-weight: 750;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+  animation: rise-in var(--dur-slow) var(--ease);
+}
+
+.stage-desc {
+  font-size: var(--stage-body);
+  color: var(--text-muted);
+  max-width: 60ch;
+}
+
+.stage-desc:empty,
+.stage-status:empty {
+  display: none;
+}
+
+.stage-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  font-size: var(--stage-body);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.stage-status .icon {
+  width: 1.2em;
+  height: 1.2em;
+  color: var(--accent);
+}
+
+/* Nomes indicados */
+.stage-candidates {
+  list-style: none;
+  margin: clamp(8px, 1vw, 16px) 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+  gap: clamp(10px, 1vw, 18px);
+}
+
+.stage-candidates li {
+  display: flex;
+  align-items: center;
+  gap: clamp(12px, 1.2vw, 22px);
+  min-height: clamp(64px, 6vw, 108px);
+  padding: clamp(12px, 1.2vw, 22px) clamp(16px, 1.6vw, 28px);
+  border: 1px solid var(--border);
+  border-radius: clamp(12px, 1vw, 20px);
+  background: var(--surface);
+  font-size: var(--stage-name);
+  font-weight: 650;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  animation: rise-in var(--dur-slow) var(--ease) both;
+}
+
+.stage-candidates .idx {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 1.7em;
+  height: 1.7em;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary-soft-ink);
+  font-size: 0.7em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-view='voting'] .stage-candidates li {
+  min-height: clamp(52px, 4.6vw, 84px);
+  font-size: calc(var(--stage-name) * 0.85);
+}
+
+.stage-empty {
+  font-size: var(--stage-body);
+  color: var(--text-muted);
+}
+
+/* Lateral: QR e participação */
+.stage-aside {
+  display: grid;
+  gap: clamp(16px, 1.6vw, 28px);
+  position: sticky;
+  top: clamp(16px, 2vw, 40px);
+}
+
+.stage-card {
+  padding: clamp(18px, 1.8vw, 32px);
+  border: 1px solid var(--border);
+  border-radius: clamp(14px, 1.2vw, 24px);
+  background: var(--surface);
+  backdrop-filter: blur(6px);
+}
+
+.stage-card h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin-bottom: clamp(12px, 1.2vw, 20px);
+  font-size: var(--stage-small);
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.qr-card {
+  text-align: center;
+}
+
+.qr-frame {
+  display: grid;
+  place-items: center;
+  margin: 0 auto;
+  padding: clamp(10px, 1vw, 18px);
+  border-radius: clamp(12px, 1vw, 20px);
+  background: #ffffff;
+  width: min(100%, clamp(180px, 15vw, 280px));
+}
+
+.qr-frame img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+[data-view='voting'] .qr-frame {
+  width: min(100%, clamp(240px, 22vw, 440px));
+}
+
+.stage-link {
+  margin-top: clamp(12px, 1vw, 18px);
+  font-size: clamp(0.95rem, 1.15vw, 1.5rem);
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.01em;
+  overflow-wrap: anywhere;
+}
+
+.stage-note {
+  margin-top: clamp(6px, 0.6vw, 10px);
+  font-size: var(--stage-small);
+  color: var(--text-muted);
+}
+
+.stage-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(12px, 1vw, 20px);
+  margin-bottom: clamp(14px, 1.2vw, 22px);
+}
+
+.stage-stat-value {
+  display: block;
+  font-size: var(--stage-stat);
+  font-weight: 750;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.stage-stat-label {
+  display: block;
+  margin-top: 0.4em;
+  font-size: var(--stage-small);
+  color: var(--text-muted);
+}
+
+.stage-stat-pending .stage-stat-value {
+  color: var(--text-muted);
+}
+
+.stage-progress {
+  height: clamp(10px, 0.9vw, 16px);
+}
+
+.stage-progress > span {
+  background: linear-gradient(90deg, #2a9d8f, #7fdccf);
+}
+
+/* Resultados no palco */
+.stage-results {
+  padding: clamp(20px, 2vw, 40px);
+  border: 1px solid var(--border);
+  border-radius: clamp(14px, 1.2vw, 24px);
+  background: var(--surface);
+}
+
+.stage-results h3 {
+  margin-bottom: clamp(16px, 1.6vw, 28px);
+  font-size: var(--stage-small);
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.stage-results .results {
+  gap: clamp(16px, 1.6vw, 30px);
+}
+
+.stage-results .result-name {
+  font-size: var(--stage-name);
+  font-weight: 650;
+}
+
+.stage-results .result-nums {
+  font-size: var(--stage-body);
+  color: var(--text-muted);
+}
+
+.stage-results .result-nums strong {
+  font-size: 1.25em;
+}
+
+.stage-results .result-badge {
+  height: auto;
+  padding: 0.2em 0.7em;
+  font-size: var(--stage-small);
+}
+
+.stage-results .bar {
+  height: clamp(14px, 1.5vw, 28px);
+}
+
+.stage-results .bar-fill {
+  background: linear-gradient(90deg, #1d7184, #2a9d8f);
+}
+
+.stage-results .is-leader .bar-fill {
+  background: linear-gradient(90deg, #2a9d8f, #7fdccf);
+}
+
+.stage-results .is-abstain .bar-fill {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.stage-results .banner {
+  font-size: var(--stage-body);
+}
+
+.stage-results .result-summary {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: clamp(8px, 1vw, 16px);
+}
+
+.stage-results .result-summary div {
+  padding: clamp(10px, 1vw, 18px);
+}
+
+.stage-results .result-summary dt {
+  font-size: var(--stage-small);
+}
+
+.stage-results .result-summary dd {
+  font-size: clamp(1.4rem, 2.2vw, 2.8rem);
+}
+
+.stage-results .small {
+  font-size: var(--stage-small);
+}
+
+/* Visões */
+[data-view='results'] .stage-main,
+[data-view='archived'] .stage-main,
+[data-view='waiting'] .stage-main {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+[data-view='results'] .stage-aside,
+[data-view='archived'] .stage-aside {
+  display: none;
+}
+
+[data-view='waiting'] .stage-aside {
+  position: static;
+  max-width: 420px;
+}
+
+[data-view='waiting'] #turnout-card,
+[data-view='closed'] #qr-card {
+  display: none;
+}
+
+[data-view='results'] .stage-content,
+[data-view='archived'] .stage-content {
+  max-width: 1500px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+[data-view='loading'] .stage-aside {
+  visibility: hidden;
+}
+
+.stage-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: clamp(10px, 1vw, 18px) clamp(20px, 3vw, 56px);
+  border-top: 1px solid var(--border);
+  font-size: var(--stage-small);
+  color: var(--text-faint);
+}
+
+/* Telas pequenas (pré-visualização no notebook/celular) */
+@media (max-width: 900px) {
+  .stage-main {
+    grid-template-columns: 1fr;
+  }
+
+  .stage-aside {
+    position: static;
+  }
+
+  .stage-results .result-summary {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
+
+  .stage-footer {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 560px) {
+  .stage-sep,
+  .stage-meeting {
+    display: none;
+  }
+
+  #fullscreen .label {
+    display: none;
+  }
+}
+
+/* Tela cheia: aproveita toda a área */
+:fullscreen .stage-header {
+  background: transparent;
+}

@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Administração — Nomeia</title>
+    <meta name="robots" content="noindex" />
+    <meta name="theme-color" content="#0f4c5c" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/admin.css" />
+    <script type="module" src="/js/admin.js"></script>
+  </head>
+  <body class="page-admin">
+    <a class="skip-link" href="#main">Pular para o conteúdo</a>
+    <header class="app-header">
+      <div class="admin-header-left">
+        <a class="brand" href="/admin.html" aria-label="Nomeia — todas as reuniões">
+          <span class="brand-mark"><span data-icon="check"></span></span><span class="brand-text">Nomeia</span>
+        </a>
+        <div id="hdr-meeting" class="hdr-meeting" hidden>
+          <span class="hdr-sep" aria-hidden="true"></span>
+          <div class="hdr-meeting-text">
+            <h1 id="mt-name" class="hdr-title"></h1>
+            <span id="mt-status" class="chip"></span>
+          </div>
+        </div>
+      </div>
+      <nav class="admin-header-right" aria-label="Navegação da reunião">
+        <span id="conn" class="chip connecting" role="status" hidden>Conectando…</span>
+        <a id="hdr-presentation" class="btn btn-secondary btn-sm" target="_blank" rel="noopener" hidden title="Abrir apresentação">
+          <span data-icon="monitor"></span><span class="label">Apresentação</span>
+        </a>
+        <a id="hdr-history" class="btn btn-ghost btn-sm" href="#history" hidden title="Histórico de cargos">
+          <span data-icon="history"></span><span class="label">Histórico</span>
+        </a>
+        <button id="logout" class="btn btn-ghost btn-sm" type="button" hidden title="Sair">
+          <span data-icon="logout"></span><span class="label">Sair</span>
+        </button>
+      </nav>
+    </header>
+
+    <main id="main" class="container admin-main" tabindex="-1">
+      <div id="flash" role="alert"></div>
+
+      <!-- ===================== LOGIN ===================== -->
+      <section id="view-login" class="login-wrap" hidden aria-labelledby="login-title">
+        <div class="card login-card">
+          <div class="entry-icon"><span data-icon="shield"></span></div>
+          <h1 id="login-title">Administração</h1>
+          <p class="muted small">Acesso restrito à mesa da reunião.</p>
+          <form id="login-form" class="mt-6">
+            <div class="field">
+              <label for="secret">Segredo administrativo</label>
+              <input id="secret" type="password" autocomplete="current-password" required maxlength="512" />
+              <p class="hint">Definido no servidor (ADMIN_SECRET). Nunca é guardado no navegador.</p>
+            </div>
+            <button class="btn btn-primary btn-lg btn-block" type="submit">Entrar</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- ===================== DASHBOARD ===================== -->
+      <section id="view-dashboard" class="stack-lg" hidden>
+        <div class="page-head">
+          <div>
+            <h1>Reuniões</h1>
+            <p class="muted">Crie uma reunião ou continue uma existente.</p>
+          </div>
+        </div>
+
+        <div class="dash-grid">
+          <section class="card" aria-labelledby="new-meeting-title">
+            <div class="card-header">
+              <div>
+                <h2 id="new-meeting-title"><span data-icon="plus"></span>Nova reunião</h2>
+                <p class="card-subtitle">Gera links de participação, apresentação e QR Code.</p>
+              </div>
+            </div>
+            <form id="meeting-form">
+              <div class="form-row">
+                <div class="field">
+                  <label for="m-name">Nome da reunião</label>
+                  <input id="m-name" type="text" required maxlength="120" placeholder="Ex.: Assembleia geral ordinária" />
+                </div>
+                <div class="field">
+                  <label for="m-expected">Participantes previstos</label>
+                  <input id="m-expected" type="number" required min="1" max="100000" inputmode="numeric" placeholder="Ex.: 40" />
+                </div>
+              </div>
+              <div class="form-actions">
+                <button class="btn btn-primary" type="submit">Criar reunião</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="card" aria-labelledby="import-title">
+            <div class="card-header">
+              <div>
+                <h2 id="import-title"><span data-icon="upload"></span>Importar</h2>
+                <p class="card-subtitle">Arquivo JSON exportado pelo Nomeia ou backup de data/backups. Nunca sobrescreve reuniões existentes.</p>
+              </div>
+            </div>
+            <form id="import-form">
+              <div class="field">
+                <label for="import-file">Arquivo .json</label>
+                <input id="import-file" type="file" accept="application/json,.json" required />
+              </div>
+              <div class="form-actions">
+                <button class="btn btn-secondary" type="submit">Importar reunião</button>
+              </div>
+            </form>
+          </section>
+        </div>
+
+        <section class="card" aria-labelledby="list-title">
+          <div class="card-header">
+            <h2 id="list-title"><span data-icon="calendar"></span>Reuniões existentes</h2>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Nome</th>
+                  <th scope="col">Situação</th>
+                  <th scope="col" class="num">Cargos</th>
+                  <th scope="col" class="hide-sm">Criada em</th>
+                  <th scope="col"><span class="sr-only">Ações</span></th>
+                </tr>
+              </thead>
+              <tbody id="meetings-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <!-- ===================== REUNIÃO ===================== -->
+      <section id="view-meeting" hidden aria-labelledby="mt-name">
+        <div id="meeting-skeleton" class="meeting-skeleton" aria-busy="true" aria-label="Carregando a reunião">
+          <div class="sk-kpis">
+            <span class="skeleton sk-kpi"></span><span class="skeleton sk-kpi"></span><span class="skeleton sk-kpi"></span><span class="skeleton sk-kpi"></span>
+          </div>
+          <span class="skeleton sk-panel"></span>
+        </div>
+
+        <div id="meeting-content" class="stack-lg" hidden>
+          <p id="mt-archived" class="banner info" hidden>
+            <span data-icon="archive"></span><span>Reunião encerrada: disponível somente para leitura, consulta e exportação.</span>
+          </p>
+
+          <!-- Indicadores -->
+          <section class="kpis" aria-label="Participação no cargo atual">
+            <div class="kpi">
+              <span class="kpi-icon" data-icon="users"></span>
+              <div class="kpi-body">
+                <p class="kpi-label">Participantes previstos</p>
+                <p class="kpi-value" id="s-expected">—</p>
+              </div>
+            </div>
+            <div class="kpi">
+              <span class="kpi-icon" data-icon="ballot"></span>
+              <div class="kpi-body">
+                <p class="kpi-label">Votos recebidos</p>
+                <p class="kpi-value" id="s-voted">—</p>
+                <p class="kpi-hint">confirmados pelo servidor</p>
+              </div>
+            </div>
+            <div class="kpi">
+              <span class="kpi-icon" data-icon="clock"></span>
+              <div class="kpi-body">
+                <p class="kpi-label">Não votaram</p>
+                <p class="kpi-value" id="s-missing">—</p>
+                <p class="kpi-hint">credenciais ativas sem voto</p>
+              </div>
+            </div>
+            <div class="kpi kpi-accent">
+              <span class="kpi-icon" data-icon="chart"></span>
+              <div class="kpi-body">
+                <p class="kpi-label">Participação</p>
+                <p class="kpi-value" id="s-pct">—</p>
+                <div class="progress" aria-hidden="true"><span id="s-bar"></span></div>
+              </div>
+            </div>
+          </section>
+
+          <div class="admin-grid">
+            <!-- Cargo em andamento -->
+            <section class="card office-card" aria-labelledby="cur-title">
+              <div class="section-head">
+                <h2 id="cur-title" class="eyebrow">Cargo em andamento</h2>
+              </div>
+
+              <div id="cur-empty">
+                <div class="empty">
+                  <div class="empty-icon"><span data-icon="ballot"></span></div>
+                  <p class="empty-title">Pronto para o próximo cargo</p>
+                  <p class="empty-text" id="cur-empty-text">Nenhum cargo em andamento.</p>
+                </div>
+              </div>
+
+              <form id="office-form" class="stack" data-mutating hidden>
+                <h3>Novo cargo</h3>
+                <div class="field">
+                  <label for="o-title">Nome do cargo</label>
+                  <input id="o-title" type="text" required maxlength="120" placeholder="Ex.: Presidente" />
+                </div>
+                <div class="field">
+                  <label for="o-desc">Descrição <span class="muted">(opcional)</span></label>
+                  <textarea id="o-desc" maxlength="500" placeholder="Mandato, atribuições ou observações"></textarea>
+                </div>
+                <div class="field">
+                  <label for="o-mode">Resultados por candidato</label>
+                  <select id="o-mode">
+                    <option value="on_publish">Ocultos até a mesa publicar (após encerrar)</option>
+                    <option value="on_close">Publicados automaticamente ao encerrar</option>
+                    <option value="live">Visíveis ao vivo durante a votação</option>
+                  </select>
+                  <p class="hint">A contagem de participação é sempre visível na apresentação.</p>
+                </div>
+                <div class="form-actions">
+                  <button class="btn btn-primary btn-lg" type="submit"><span data-icon="monitor"></span>Criar e apresentar</button>
+                  <button id="office-cancel" class="btn btn-ghost btn-lg" type="button">Cancelar</button>
+                </div>
+              </form>
+
+              <div id="cur-office" hidden>
+                <div class="office-head">
+                  <div class="row">
+                    <span id="co-status" class="chip"></span>
+                    <span id="co-mode-label" class="xsmall muted"></span>
+                  </div>
+                  <h3 id="co-title" class="office-title"></h3>
+                  <p id="co-desc" class="muted"></p>
+                </div>
+
+                <div class="office-section">
+                  <div class="section-head">
+                    <h4>Nomes indicados</h4>
+                    <span id="cand-count" class="count-pill">0</span>
+                  </div>
+                  <ul id="cand-list" class="cand-list" aria-live="polite"></ul>
+                  <form id="cand-form" class="input-group" data-mutating>
+                    <label for="cand-name" class="sr-only">Novo nome</label>
+                    <input id="cand-name" type="text" maxlength="120" placeholder="Adicionar nome indicado" required />
+                    <button class="btn btn-secondary" type="submit"><span data-icon="plus"></span>Adicionar</button>
+                  </form>
+                </div>
+
+                <div class="office-settings field" data-mutating id="mode-field">
+                  <label for="co-mode">Resultados por candidato</label>
+                  <select id="co-mode">
+                    <option value="on_publish">Ocultos até a mesa publicar</option>
+                    <option value="on_close">Publicados ao encerrar</option>
+                    <option value="live">Visíveis ao vivo</option>
+                  </select>
+                </div>
+
+                <div class="office-actions" data-mutating>
+                  <div class="actions-primary">
+                    <button id="btn-open" class="btn btn-accent btn-lg" type="button"><span data-icon="play"></span>Abrir votação</button>
+                    <button id="btn-publish" class="btn btn-primary btn-lg" type="button"><span data-icon="eye"></span>Publicar resultados</button>
+                    <button id="btn-results" class="btn btn-secondary btn-lg" type="button"><span data-icon="chart"></span>Ver resultados</button>
+                    <button id="btn-next" class="btn btn-primary btn-lg" type="button"><span data-icon="arrow-right"></span>Próximo cargo</button>
+                  </div>
+                  <div class="actions-danger">
+                    <p class="hint">Bloqueia novos votos e sela o resultado.</p>
+                    <button id="btn-close" class="btn btn-danger btn-lg" type="button"><span data-icon="stop"></span>Encerrar votação</button>
+                  </div>
+                </div>
+
+                <div id="co-results" aria-live="polite"></div>
+              </div>
+            </section>
+
+            <aside class="admin-aside">
+              <!-- Acesso -->
+              <section class="card" aria-labelledby="access-title">
+                <div class="card-header">
+                  <h2 id="access-title"><span data-icon="qr"></span>Acesso</h2>
+                </div>
+                <div class="access-qr">
+                  <img id="mt-qr" alt="QR Code do link público da reunião" width="168" height="168" />
+                </div>
+                <div class="access-field">
+                  <label for="public-url">Link público (participantes)</label>
+                  <div class="input-group">
+                    <input id="public-url" type="text" readonly />
+                    <button class="btn btn-secondary" type="button" data-copy="#public-url" aria-label="Copiar link público"><span data-icon="copy"></span></button>
+                  </div>
+                </div>
+                <div class="access-field">
+                  <label for="presentation-url">Apresentação (projetor)</label>
+                  <div class="input-group">
+                    <input id="presentation-url" type="text" readonly />
+                    <button class="btn btn-secondary" type="button" data-copy="#presentation-url" aria-label="Copiar link da apresentação"><span data-icon="copy"></span></button>
+                    <a id="presentation-open" class="btn btn-secondary" target="_blank" rel="noopener" aria-label="Abrir apresentação em nova aba"><span data-icon="external"></span></a>
+                  </div>
+                </div>
+                <p class="hint mt-3">O link público mostra a reunião; só vota quem tem credencial individual.</p>
+                <details class="disclosure" data-mutating>
+                  <summary><span data-icon="sliders"></span>Editar nome e total previsto</summary>
+                  <form id="edit-meeting-form" class="stack">
+                    <div class="field">
+                      <label for="e-name">Nome</label>
+                      <input id="e-name" type="text" required maxlength="120" />
+                    </div>
+                    <div class="field">
+                      <label for="e-expected">Total previsto</label>
+                      <input id="e-expected" type="number" min="1" max="100000" required />
+                    </div>
+                    <button class="btn btn-secondary" type="submit">Salvar alterações</button>
+                  </form>
+                </details>
+              </section>
+
+              <!-- Detalhes de participação -->
+              <section class="card" aria-labelledby="part-title">
+                <div class="card-header">
+                  <h2 id="part-title"><span data-icon="users"></span>Detalhes</h2>
+                </div>
+                <dl class="detail-list">
+                  <div><dt>Credenciais distribuídas (ativas)</dt><dd id="s-creds">—</dd></div>
+                  <div><dt>Credenciais já usadas</dt><dd id="s-claimed">—</dd></div>
+                  <div><dt>Abstenções</dt><dd id="s-abst">—</dd></div>
+                  <div><dt>Votos válidos</dt><dd id="s-valid">—</dd></div>
+                </dl>
+                <p class="hint mt-3">
+                  Números contam votos confirmados, nunca aparelhos conectados. Abstenção é um voto registrado sem escolha de nome.
+                </p>
+              </section>
+            </aside>
+          </div>
+
+          <!-- Credenciais -->
+          <section id="credentials" class="card" aria-labelledby="cred-title">
+            <div class="card-header">
+              <div>
+                <h2 id="cred-title"><span data-icon="key"></span>Credenciais individuais</h2>
+                <p class="card-subtitle">
+                  Uma por participante presente; vale um voto por cargo em toda a reunião. Cartão perdido ou troca de aparelho sem cartão:
+                  use <strong>Reemitir</strong> (o antigo deixa de valer e votos já dados contam uma única vez).
+                </p>
+              </div>
+            </div>
+            <form id="cred-form" class="cred-form" data-mutating>
+              <div class="field f-count">
+                <label for="cred-count">Quantidade</label>
+                <input id="cred-count" type="number" min="1" max="500" value="10" required />
+              </div>
+              <div class="field f-prefix">
+                <label for="cred-prefix">Rótulo</label>
+                <input id="cred-prefix" type="text" maxlength="40" value="Credencial" />
+              </div>
+              <button class="btn btn-primary" type="submit"><span data-icon="plus"></span>Emitir credenciais</button>
+            </form>
+
+            <section id="issued" class="issued" hidden aria-labelledby="issued-title">
+              <div class="issued-head">
+                <div>
+                  <h3 id="issued-title"><span data-icon="alert"></span>Credenciais emitidas agora</h3>
+                  <p>Imprima ou distribua antes de sair desta tela: os códigos não ficam guardados no servidor.</p>
+                </div>
+                <div class="row">
+                  <button id="print-cards" class="btn btn-primary" type="button"><span data-icon="printer"></span>Imprimir cartões</button>
+                  <button id="hide-issued" class="btn btn-secondary" type="button">Ocultar</button>
+                </div>
+              </div>
+              <div id="issued-cards" class="cards"></div>
+            </section>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Credencial</th>
+                    <th scope="col">Situação</th>
+                    <th scope="col">Cargo atual</th>
+                    <th scope="col"><span class="sr-only">Ações</span></th>
+                  </tr>
+                </thead>
+                <tbody id="cred-body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- Histórico -->
+          <section id="history" class="card" aria-labelledby="hist-title" tabindex="-1">
+            <div class="card-header">
+              <div>
+                <h2 id="hist-title"><span data-icon="history"></span>Histórico de cargos</h2>
+                <p class="card-subtitle">Resultados encerrados são imutáveis e selados com SHA-256.</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="history-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Cargo</th>
+                    <th scope="col">Data da votação</th>
+                    <th scope="col" class="num">Candidatos</th>
+                    <th scope="col" class="num">Total de votos</th>
+                    <th scope="col" class="num">Participação</th>
+                    <th scope="col"><span class="sr-only">Ações</span></th>
+                  </tr>
+                </thead>
+                <tbody id="hist-list"></tbody>
+              </table>
+            </div>
+            <section id="hist-detail" class="history-detail" hidden aria-live="polite"></section>
+          </section>
+
+          <!-- Exportações -->
+          <section class="card" aria-labelledby="exp-title">
+            <div class="card-header">
+              <h2 id="exp-title"><span data-icon="database"></span>Exportação e backup</h2>
+            </div>
+            <div class="export-grid">
+              <a id="exp-json" class="export-item" download>
+                <span class="ei-icon" data-icon="download"></span>
+                <span><strong>Exportar JSON</strong><small>Backup completo, reimportável</small></span>
+              </a>
+              <a id="exp-csv" class="export-item" download>
+                <span class="ei-icon" data-icon="download"></span>
+                <span><strong>Exportar CSV</strong><small>Resultados de todos os cargos</small></span>
+              </a>
+              <button id="btn-backup" class="export-item" type="button">
+                <span class="ei-icon" data-icon="database"></span>
+                <span><strong>Criar backup no servidor</strong><small>Cópia versionada em data/backups</small></span>
+              </button>
+            </div>
+            <p id="backup-info" class="hint mt-3"></p>
+          </section>
+
+          <!-- Zona de risco -->
+          <section class="card danger-zone" aria-labelledby="danger-title" data-mutating>
+            <div class="danger-row">
+              <div>
+                <h2 id="danger-title">Encerrar reunião</h2>
+                <p class="small muted mt-1">A reunião fica somente leitura. Resultados finalizados nunca são sobrescritos.</p>
+              </div>
+              <button id="btn-archive" class="btn btn-danger-outline" type="button"><span data-icon="archive"></span>Encerrar reunião</button>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <div id="print-area" class="cards" hidden></div>
+  </body>
+</html>

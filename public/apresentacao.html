@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="pt-BR" class="theme-stage">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Apresentação — Nomeia</title>
+    <meta name="theme-color" content="#052029" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/apresentacao.css" />
+    <script type="module" src="/js/apresentacao.js"></script>
+  </head>
+  <body class="page-stage">
+    <div id="stage" class="stage" data-view="loading">
+      <header class="stage-header">
+        <div class="stage-brand">
+          <span class="brand-mark"><span data-icon="check"></span></span>
+          <span class="stage-brand-name">Nomeia</span>
+          <span class="stage-sep" aria-hidden="true"></span>
+          <h1 id="meeting-name" class="stage-meeting">Carregando…</h1>
+        </div>
+        <div class="row">
+          <span id="conn" class="chip connecting" role="status">Conectando…</span>
+          <button id="fullscreen" class="btn btn-sm stage-btn" type="button" aria-label="Alternar tela cheia">
+            <span data-icon="maximize"></span><span class="label">Tela cheia</span>
+          </button>
+        </div>
+      </header>
+
+      <main id="main" class="stage-main">
+        <section class="stage-content" aria-labelledby="office-title">
+          <p id="error" class="banner error" role="alert" hidden></p>
+          <div id="office-status" class="stage-kicker"></div>
+          <h2 id="office-title" class="stage-title"><span class="skeleton sk-title"></span></h2>
+          <p id="office-desc" class="stage-desc"></p>
+          <p id="status-line" class="stage-status" aria-live="polite"></p>
+          <div id="candidates"></div>
+          <div id="results" aria-live="polite"></div>
+        </section>
+
+        <aside class="stage-aside" aria-label="Acesso e participação">
+          <section id="qr-card" class="stage-card qr-card" aria-labelledby="qr-title">
+            <h2 id="qr-title"><span data-icon="qr"></span>Acompanhe no celular</h2>
+            <div class="qr-frame">
+              <img id="qr" alt="QR Code com o link público da reunião" width="280" height="280" />
+            </div>
+            <p id="public-link" class="stage-link mono"></p>
+            <p class="stage-note">Para votar, use sua credencial individual (cartão ou QR pessoal).</p>
+          </section>
+
+          <section id="turnout-card" class="stage-card" aria-labelledby="turnout-title">
+            <h2 id="turnout-title"><span data-icon="users"></span>Participação</h2>
+            <div class="stage-stats">
+              <div>
+                <span class="stage-stat-value" id="t-voted">0</span>
+                <span class="stage-stat-label">votos recebidos</span>
+              </div>
+              <div class="stage-stat-pending">
+                <span class="stage-stat-value" id="t-pending">0</span>
+                <span class="stage-stat-label">pendentes</span>
+              </div>
+            </div>
+            <div class="progress stage-progress" aria-hidden="true"><span id="t-bar"></span></div>
+            <p class="stage-note"><strong id="t-pct">0%</strong> de <span id="t-expected">0</span> participantes previstos</p>
+            <p id="t-note" class="stage-note">Votos confirmados pelo servidor, não aparelhos conectados.</p>
+          </section>
+        </aside>
+      </main>
+
+      <footer class="stage-footer">
+        <span id="meeting-title"></span>
+        <span>Resultados exibidos conforme liberação da mesa. Nenhum resultado declara eleição automaticamente.</span>
+      </footer>
+    </div>
+  </body>
+</html>
