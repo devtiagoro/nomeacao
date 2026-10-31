@@ -79,7 +79,7 @@
   font-size: var(--text-sm);
 }
 
-.office-area > * + * {
+#office-area > * + * {
   margin-top: var(--space-4);
 }
 

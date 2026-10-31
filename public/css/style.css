@@ -254,6 +254,12 @@ textarea {
   border-radius: var(--radius-sm);
 }
 
+/* Foco movido por script (regiões, não controles): sem anel visual. */
+[tabindex='-1']:focus,
+[tabindex='-1']:focus-visible {
+  outline: none;
+}
+
 ::selection {
   background: var(--accent-soft);
 }

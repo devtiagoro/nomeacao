@@ -176,7 +176,7 @@
   margin: clamp(8px, 1vw, 16px) 0 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 28rem), 1fr));
   gap: clamp(10px, 1vw, 18px);
 }
 
@@ -269,7 +269,8 @@
 }
 
 [data-view='voting'] .qr-frame {
-  width: min(100%, clamp(240px, 22vw, 440px));
+  /* Limitado pela altura: QR e participação cabem juntos em 1080p. */
+  width: min(100%, clamp(220px, 30vh, 400px));
 }
 
 .stage-link {
@@ -480,4 +481,46 @@
 /* Tela cheia: aproveita toda a área */
 :fullscreen .stage-header {
   background: transparent;
+}
+
+/* Votação: lateral compacta para manter participação visível sem rolagem */
+[data-view='voting'] .stage-aside {
+  gap: clamp(12px, 1.2vw, 20px);
+}
+
+[data-view='voting'] .stage-card {
+  padding: clamp(14px, 1.4vw, 26px);
+}
+
+[data-view='voting'] .stage-stat-value {
+  font-size: clamp(2rem, 3.4vw, 4rem);
+}
+
+/* Resultados: título menor e linhas mais compactas para caber no telão */
+[data-view='results'] .stage-main {
+  padding-top: clamp(16px, 2vw, 40px);
+}
+
+[data-view='results'] .stage-title {
+  font-size: clamp(2rem, 3.2vw, 3.8rem);
+}
+
+[data-view='results'] .stage-desc {
+  display: none;
+}
+
+[data-view='results'] .stage-results .results {
+  gap: clamp(10px, 1.1vw, 22px);
+}
+
+[data-view='results'] .stage-results .result-head {
+  margin-bottom: 0.3em;
+}
+
+[data-view='results'] .stage-results .bar {
+  height: clamp(12px, 1.1vw, 22px);
+}
+
+[data-view='results'] .stage-results .is-abstain {
+  padding-top: clamp(10px, 1vw, 18px);
 }
