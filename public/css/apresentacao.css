@@ -1,7 +1,7 @@
 /* NOMEIA — Apresentação para telão/projetor.
    Tema escuro azul-petróleo fixo (alto contraste, legível à distância). */
 
-:root.theme-stage {
+.page-stage {
   --bg: #052029;
   --surface: rgba(255, 255, 255, 0.055);
   --surface-2: rgba(255, 255, 255, 0.07);

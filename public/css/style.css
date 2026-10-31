@@ -125,7 +125,7 @@
 
 /* ---------- 3. Tokens semânticos (escuro) ---------- */
 @media (prefers-color-scheme: dark) {
-  :root:not(.theme-stage) {
+  :root {
     --bg: #0a1519;
     --surface: #101e23;
     --surface-2: #14252b;
@@ -601,9 +601,9 @@ textarea {
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not(.theme-stage) .btn-danger,
-  :root:not(.theme-stage) .btn-accent,
-  :root:not(.theme-stage) .btn-success {
+  :root .btn-danger,
+  :root .btn-accent,
+  :root .btn-success {
     --btn-fg: #08161a;
   }
 }

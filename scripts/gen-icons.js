@@ -8,7 +8,7 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 
 const OUT = path.join(__dirname, '..', 'public', 'icons');
-const BLUE = [29, 78, 216];
+const BLUE = [15, 76, 92]; // azul-petróleo #0f4c5c
 const WHITE = [255, 255, 255];
 
 const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {

@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="NOMEIA">
-  <rect width="100" height="100" rx="22" fill="#1d4ed8"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Nomeia">
+  <rect width="100" height="100" rx="22" fill="#0f4c5c"/>
   <rect x="24" y="20" width="52" height="60" rx="7" fill="#fff"/>
-  <path d="M35 52 L46 64 L66 37" fill="none" stroke="#1d4ed8" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M35 52 L46 64 L66 37" fill="none" stroke="#0f4c5c" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

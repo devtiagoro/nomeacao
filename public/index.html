@@ -3,12 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>NOMEIA — Nomeações e votações</title>
+    <title>Nomeia — Nomeações e votações</title>
     <meta name="description" content="Nomeações e votações de cargos em reuniões presenciais" />
-    <meta name="theme-color" content="#1d4ed8" />
+    <meta name="theme-color" content="#0f4c5c" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="NOMEIA" />
+    <meta name="apple-mobile-web-app-title" content="Nomeia" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
@@ -18,32 +19,36 @@
   <body>
     <a class="skip-link" href="#main">Pular para o conteúdo</a>
     <header class="app-header">
-      <span class="brand">NOMEIA</span>
+      <span class="brand"><span class="brand-mark"><span data-icon="check"></span></span>Nomeia</span>
     </header>
-    <main id="main" class="container narrow stack" tabindex="-1">
-      <h1>Nomeações e votações</h1>
-      <p class="muted">Participe da votação da sua reunião pelo celular.</p>
+    <main id="main" class="container narrow entry" tabindex="-1">
+      <div class="entry-hero">
+        <span class="eyebrow">Reuniões presenciais</span>
+        <h1>Nomeações e votações, direto do celular</h1>
+        <p class="muted">Acompanhe os cargos em tempo real e vote com a sua credencial individual.</p>
+      </div>
 
-      <section id="continue" class="card stack" hidden aria-labelledby="continue-title">
-        <h2 id="continue-title">Reunião vinculada a este aparelho</h2>
-        <a id="continue-link" class="btn btn-primary btn-lg btn-block" href="/votar.html">Abrir reunião</a>
+      <section id="continue" class="card" hidden aria-labelledby="continue-title">
+        <h2 id="continue-title" class="small muted">Reunião vinculada a este aparelho</h2>
+        <a id="continue-link" class="btn btn-primary btn-xl btn-block mt-3" href="/votar.html">Abrir reunião<span data-icon="arrow-right"></span></a>
       </section>
 
-      <section class="card stack" aria-labelledby="code-title">
+      <section class="card" aria-labelledby="code-title">
+        <div class="entry-icon"><span data-icon="key"></span></div>
         <h2 id="code-title">Tenho um cartão de credencial</h2>
-        <p class="small muted">Leia o QR Code do cartão com a câmera ou digite o código impresso.</p>
-        <form id="code-form" novalidate>
+        <p class="small muted mt-1">Leia o QR Code do cartão com a câmera ou digite o código impresso.</p>
+        <form id="code-form" class="mt-4" novalidate>
           <div class="field">
             <label for="code">Código da credencial</label>
-            <input id="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"
+            <input id="code" class="code-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"
               placeholder="XXXX-XXXX-XXXX" maxlength="20" required />
           </div>
-          <p id="code-error" class="banner error" role="alert" hidden></p>
-          <button class="btn btn-primary btn-block" type="submit">Entrar</button>
+          <p id="code-error" class="banner error mt-3" role="alert" hidden></p>
+          <button class="btn btn-primary btn-lg btn-block mt-4" type="submit">Entrar</button>
         </form>
       </section>
 
-      <p class="small"><a href="/admin.html">Área da administração</a></p>
+      <p class="footer-note"><a href="/admin.html">Área da administração</a></p>
     </main>
   </body>
 </html>

@@ -642,6 +642,11 @@ details.disclosure form {
   font-weight: 600;
 }
 
+.history-table td:first-child .badge {
+  margin-left: var(--space-2);
+  vertical-align: middle;
+}
+
 .history-table tr.is-selected {
   background: var(--primary-soft);
 }

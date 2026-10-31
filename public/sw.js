@@ -2,13 +2,15 @@
 // Guarda apenas a "casca" do app (HTML/CSS/JS/ícones) para abrir rápido e mostrar a tela offline.
 // NUNCA armazena respostas de /api nem enfileira votos: o servidor é a única autoridade.
 
-const CACHE = 'nomeia-shell-v1';
+const CACHE = 'nomeia-shell-v2';
 const SHELL = [
   '/index.html',
   '/votar.html',
   '/apresentacao.html',
   '/offline.html',
   '/css/style.css',
+  '/css/votar.css',
+  '/css/apresentacao.css',
   '/js/common.js',
   '/js/index.js',
   '/js/votar.js',
