@@ -1,10 +1,8 @@
 import {
-  api,
   el,
   $,
   setText,
   announce,
-  connectLive,
   isMeetingId,
   statusChip,
   renderResults,
@@ -15,13 +13,12 @@ import {
   toast,
   confirmDialog,
   emptyState,
-  isRemoteServer,
-  adminUrl,
 } from './common.js';
+import * as db from './db.js';
+import { resultsCsv } from './domain.js';
 
-// O painel roda sempre no próprio servidor Node: a sessão (cookie HttpOnly + SameSite=Strict)
-// não funciona a partir de outra origem, como o GitHub Pages. Nesse caso, redireciona.
-if (isRemoteServer) location.replace(adminUrl(location.search));
+// A segurança NÃO depende desta tela: toda gravação é verificada pelas regras do Firebase
+// (database.rules.json), que só aceitam contas da mesa cadastradas em /admins.
 
 const meetingId = new URLSearchParams(location.search).get('m');
 let state = null;
@@ -75,10 +72,7 @@ async function action(btn, fn, okMsg) {
     if (okMsg) toast(okMsg);
     return r;
   } catch (e) {
-    if (e.status === 401) {
-      showLogin();
-      flash('Sessão expirada. Entre novamente.');
-    } else flash(e.message);
+    flash(e.code === 'permission_denied' ? 'Operação recusada pelas regras de segurança. Confira se a sua conta é administradora.' : e.message);
     return undefined;
   } finally {
     if (btn) {
@@ -88,7 +82,17 @@ async function action(btn, fn, okMsg) {
   }
 }
 
-const mpath = (suffix = '') => `/api/admin/meetings/${encodeURIComponent(meetingId)}${suffix}`;
+/** Baixa um arquivo gerado no navegador (exportações). */
+function download(name, type, content) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const a = el('a', { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const fileName = (ext) => `nomeia-${meetingId}-${new Date().toISOString().slice(0, 10)}.${ext}`;
 
 /** Re-renderiza uma região somente quando seus dados mudarem (preserva foco e edição). */
 function changed(name, value) {
@@ -101,25 +105,23 @@ function changed(name, value) {
 // ---------------- Login / sessão ----------------
 
 function showLogin() {
-  live?.close();
+  live?.();
   live = null;
   show('view-login');
   $('#logout').hidden = true;
   $('#conn').hidden = true;
-  $('#secret').focus();
+  $('#email').focus();
 }
 
 $('#login-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const btn = ev.submitter;
-  const ok = await action(btn, () => api('/api/admin/login', { method: 'POST', body: { secret: $('#secret').value } }));
+  await action(btn, () => db.signIn($('#email').value.trim(), $('#secret').value));
   $('#secret').value = '';
-  if (ok) boot();
 });
 
 $('#logout').addEventListener('click', async () => {
-  await api('/api/admin/logout', { method: 'POST' }).catch(() => {});
-  showLogin();
+  await db.signOut().catch(() => {});
   toast('Sessão encerrada.', 'info');
 });
 
@@ -136,7 +138,7 @@ async function showDashboard() {
   document.title = 'Reuniões — Nomeia';
   const body = $('#meetings-body');
   body.replaceChildren(...skeletonRows(5));
-  const list = await action(null, () => api('/api/admin/meetings'));
+  const list = await action(null, () => db.listMeetings({ includeArchived: true }));
   if (!list) return;
   body.replaceChildren(
     ...(list.length
@@ -164,10 +166,8 @@ async function showDashboard() {
 
 $('#meeting-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
-  const m = await action(ev.submitter, () =>
-    api('/api/admin/meetings', { method: 'POST', body: { name: $('#m-name').value, expectedParticipants: Number($('#m-expected').value) } }),
-  );
-  if (m) location.href = `admin.html?m=${encodeURIComponent(m.id)}`;
+  const id = await action(ev.submitter, () => db.createMeeting({ name: $('#m-name').value, expectedParticipants: Number($('#m-expected').value) }));
+  if (id) location.href = `admin.html?m=${encodeURIComponent(id)}`;
 });
 
 $('#import-form').addEventListener('submit', async (ev) => {
@@ -181,8 +181,9 @@ $('#import-form').addEventListener('submit', async (ev) => {
   } catch {
     return flash('Arquivo JSON inválido.');
   }
-  const r = await action(ev.submitter, () => api('/api/admin/import', { method: 'POST', body: doc }), 'Reunião importada.');
-  if (r) location.href = `admin.html?m=${encodeURIComponent(r.id)}`;
+  const r = await action(ev.submitter, () => db.importMeeting(doc), 'Reunião importada.');
+  if (r?.droppedOpenVotes) toast('Votos parciais de votações que estavam abertas na exportação não puderam ser restaurados.', 'info');
+  if (r) setTimeout(() => (location.href = `admin.html?m=${encodeURIComponent(r.id)}`), r.droppedOpenVotes ? 2500 : 0);
 });
 
 // ---------------- Reunião ----------------
@@ -190,29 +191,29 @@ $('#import-form').addEventListener('submit', async (ev) => {
 async function openMeeting() {
   show('view-meeting');
   $('#conn').hidden = false;
-  $('#exp-json').href = mpath('/export.json');
-  $('#exp-csv').href = mpath('/export.csv');
-  const links = await action(null, () => api(mpath('/links')));
-  if (links) {
-    $('#public-url').value = links.publicUrl;
-    $('#presentation-url').value = links.presentationUrl;
-    $('#presentation-open').href = links.presentationUrl;
-    $('#hdr-presentation').href = links.presentationUrl;
-    $('#mt-qr').src = links.qr;
+  const publicUrl = db.pageUrl('votar.html', meetingId);
+  const presentationUrl = db.pageUrl('apresentacao.html', meetingId);
+  $('#public-url').value = publicUrl;
+  $('#presentation-url').value = presentationUrl;
+  $('#presentation-open').href = presentationUrl;
+  $('#hdr-presentation').href = presentationUrl;
+  db.qrDataUrl(publicUrl)
+    .then((src) => {
+      $('#mt-qr').src = src;
+    })
+    .catch(() => {});
+  if (!live) {
+    db.watchConnection((st) => statusChip($('#conn'), st)).catch(() => {});
+    live = await db.watchMeeting(
+      meetingId,
+      { admin: true },
+      (s) => {
+        state = s;
+        renderMeeting();
+      },
+      (reason) => flash(reason === 'not_found' ? 'Reunião não encontrada.' : 'Acesso negado: esta conta não é administradora.'),
+    );
   }
-  live = connectLive({
-    meetingId,
-    role: 'admin',
-    onState: (s) => {
-      state = s;
-      renderMeeting();
-    },
-    onStatus: (st) => statusChip($('#conn'), st),
-    onFatal: (reason) => {
-      if (reason === 'unauthorized') showLogin();
-      else flash('Reunião não encontrada.');
-    },
-  });
 }
 
 const currentOffice = () => state.offices.find((o) => o.id === state.currentOfficeId) || null;
@@ -306,6 +307,12 @@ function renderCurrent(archived) {
         el('p', { class: 'hash' }, `Integridade (SHA-256): ${o.resultHash}`),
       );
     }
+  } else if (closed && !o.result) {
+    // Encerrada, mas a conexão caiu antes de gravar o resultado: permite concluir a apuração.
+    keys.closedResult = '';
+    const seal = el('button', { class: 'btn btn-primary', type: 'button' }, icon('check-circle'), 'Concluir apuração');
+    seal.addEventListener('click', () => action(seal, () => db.sealResult(meetingId, o.id), 'Resultado registrado.'));
+    res.replaceChildren(el('p', { class: 'banner warn mb-4' }, icon('alert'), el('span', {}, 'Votação encerrada, mas o resultado ainda não foi registrado.')), seal);
   } else if (o.status === 'discussing') {
     keys.closedResult = '';
     res.replaceChildren(
@@ -348,8 +355,12 @@ function renderCandidates(o, editable) {
         const form = el('form', { class: 'cand-edit' }, input, save, cancel);
         form.addEventListener('submit', async (ev) => {
           ev.preventDefault();
-          const ok = await action(save, () => api(mpath(`/offices/${o.id}/candidates/${c.id}`), { method: 'PATCH', body: { name: input.value } }), 'Nome atualizado.');
-          if (ok) editingCandidate = null;
+          const ok = await action(save, async () => (await db.renameCandidate(meetingId, o.id, c.id, input.value), true), 'Nome atualizado.');
+          if (ok) {
+            editingCandidate = null;
+            keys.cands = '';
+            renderMeeting();
+          }
         });
         setTimeout(() => input.focus(), 0);
         return el('li', { class: 'cand-item' }, index, form);
@@ -370,7 +381,7 @@ function renderCandidates(o, editable) {
             confirmLabel: 'Remover',
             danger: true,
           });
-          if (ok) action(del, () => api(mpath(`/offices/${o.id}/candidates/${c.id}`), { method: 'DELETE' }), 'Nome removido.');
+          if (ok) action(del, () => db.removeCandidate(meetingId, o.id, c.id), 'Nome removido.');
         });
         li.append(el('span', { class: 'cand-actions' }, edit, del));
       }
@@ -402,21 +413,24 @@ function openHistory(id) {
 
 function renderHistory() {
   const closed = state.offices.filter((o) => o.status === 'closed');
-  if (changed('hist', [closed.map((o) => [o.id, o.title, o.resultsPublished]), selectedHistory])) {
+  if (changed('hist', [closed.map((o) => [o.id, o.title, o.resultsPublished, Boolean(o.result)]), selectedHistory])) {
     const list = $('#hist-list');
     list.replaceChildren(
       ...(closed.length
         ? closed.map((o) => {
-            const btn = el('button', { class: 'btn btn-secondary btn-sm', type: 'button', 'aria-controls': 'hist-detail', 'aria-label': `Ver resultado de ${o.title}` }, icon('chart'), 'Ver resultado');
-            btn.addEventListener('click', () => openHistory(o.id));
+            const r = o.result;
+            const btn = r
+              ? el('button', { class: 'btn btn-secondary btn-sm', type: 'button', 'aria-controls': 'hist-detail', 'aria-label': `Ver resultado de ${o.title}` }, icon('chart'), 'Ver resultado')
+              : el('span', { class: 'badge' }, 'apurando…');
+            if (r) btn.addEventListener('click', () => openHistory(o.id));
             return el(
               'tr',
               { class: o.id === selectedHistory ? 'is-selected' : '' },
               el('td', {}, o.title, o.resultsPublished ? null : el('span', { class: 'badge', title: 'Resultado não publicado' }, 'não publicado')),
               el('td', { class: 'muted' }, fmtDate(o.closedAt)),
-              el('td', { class: 'num' }, String(o.result.candidates.length)),
-              el('td', { class: 'num' }, String(o.result.castVotes)),
-              el('td', { class: 'num' }, String(o.result.presentParticipants ?? o.result.expectedParticipants ?? '—')),
+              el('td', { class: 'num' }, String(o.candidates.length)),
+              el('td', { class: 'num' }, r ? String(r.castVotes) : '—'),
+              el('td', { class: 'num' }, String(r?.presentParticipants ?? r?.expectedParticipants ?? '—')),
               el('td', { class: 'num' }, btn),
             );
           })
@@ -433,15 +447,21 @@ function renderHistory() {
           ]),
     );
   }
-  const o = closed.find((x) => x.id === selectedHistory);
+  const o = closed.find((x) => x.id === selectedHistory && x.result);
   const detail = $('#hist-detail');
   detail.hidden = !o;
   if (!o || !changed('histDetail', [o.id, o.resultsPublished, state.status])) return;
   detail.tabIndex = -1;
-  const csv = el('a', { class: 'btn btn-secondary btn-sm', href: mpath(`/offices/${o.id}/export.csv`), download: '' }, icon('download'), 'Exportar CSV');
+  const csv = el('button', { class: 'btn btn-secondary btn-sm', type: 'button' }, icon('download'), 'Exportar CSV');
+  csv.addEventListener('click', () =>
+    action(csv, async () => {
+      const doc = await db.exportMeeting(meetingId);
+      download(fileName('csv'), 'text/csv;charset=utf-8', resultsCsv(doc.meeting, doc.results, [o.id]));
+    }),
+  );
   const pub =
     !o.resultsPublished && state.status === 'active' ? el('button', { class: 'btn btn-primary btn-sm', type: 'button' }, icon('eye'), 'Publicar resultado') : null;
-  pub?.addEventListener('click', () => action(pub, () => api(mpath(`/offices/${o.id}/publish`), { method: 'POST' }), 'Resultado publicado.'));
+  pub?.addEventListener('click', () => action(pub, () => db.publishResults(meetingId, o.id), 'Resultado publicado.'));
   const closeBtn = el('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Fechar detalhes' }, icon('x'));
   closeBtn.addEventListener('click', () => {
     selectedHistory = null;
@@ -477,10 +497,7 @@ function renderHistory() {
 $('#office-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const r = await action(ev.submitter, () =>
-    api(mpath('/offices'), {
-      method: 'POST',
-      body: { title: $('#o-title').value, description: $('#o-desc').value, resultsMode: $('#o-mode').value, start: true },
-    }),
+    db.createOffice(meetingId, { title: $('#o-title').value, description: $('#o-desc').value, resultsMode: $('#o-mode').value, start: true }),
   );
   if (r) {
     showOfficeForm = false;
@@ -500,7 +517,7 @@ $('#cand-form').addEventListener('submit', async (ev) => {
   const o = currentOffice();
   const name = $('#cand-name').value;
   if (!o || !name.trim()) return;
-  const r = await action(ev.submitter, () => api(mpath(`/offices/${o.id}/candidates`), { method: 'POST', body: { name } }));
+  const r = await action(ev.submitter, async () => (await db.addCandidate(meetingId, o.id, name), true));
   if (r) {
     $('#cand-name').value = '';
     $('#cand-name').focus();
@@ -510,7 +527,7 @@ $('#cand-form').addEventListener('submit', async (ev) => {
 
 $('#co-mode').addEventListener('change', () => {
   const o = currentOffice();
-  if (o) action($('#co-mode'), () => api(mpath(`/offices/${o.id}`), { method: 'PATCH', body: { resultsMode: $('#co-mode').value } }), 'Modo de resultados atualizado.');
+  if (o) action($('#co-mode'), () => db.setResultsMode(meetingId, o.id, $('#co-mode').value), 'Modo de resultados atualizado.');
 });
 
 $('#btn-open').addEventListener('click', async (ev) => {
@@ -523,7 +540,7 @@ $('#btn-open').addEventListener('click', async (ev) => {
     confirmLabel: 'Abrir votação',
     iconName: 'play',
   });
-  if (ok) action(btn, () => api(mpath(`/offices/${o.id}/open`), { method: 'POST' }), 'Votação aberta.');
+  if (ok) action(btn, () => db.openVoting(meetingId, o.id), 'Votação aberta.');
 });
 
 $('#btn-close').addEventListener('click', async (ev) => {
@@ -537,7 +554,7 @@ $('#btn-close').addEventListener('click', async (ev) => {
     confirmLabel: 'Encerrar votação',
     danger: true,
   });
-  if (ok) action(btn, () => api(mpath(`/offices/${o.id}/close`), { method: 'POST' }), 'Votação encerrada e resultado registrado.');
+  if (ok) action(btn, () => db.closeVoting(meetingId, o.id), 'Votação encerrada e resultado registrado.');
 });
 
 $('#btn-publish').addEventListener('click', async (ev) => {
@@ -550,7 +567,7 @@ $('#btn-publish').addEventListener('click', async (ev) => {
     confirmLabel: 'Publicar',
     iconName: 'eye',
   });
-  if (ok) action(btn, () => api(mpath(`/offices/${o.id}/publish`), { method: 'POST' }), 'Resultado publicado.');
+  if (ok) action(btn, () => db.publishResults(meetingId, o.id), 'Resultado publicado.');
 });
 
 $('#btn-results').addEventListener('click', () => {
@@ -570,15 +587,29 @@ $('#edit-meeting-form').addEventListener('submit', (ev) => {
   ev.preventDefault();
   action(
     ev.submitter,
-    () => api(mpath(), { method: 'PATCH', body: { name: $('#e-name').value, expectedParticipants: Number($('#e-expected').value) } }),
+    () => db.updateMeeting(meetingId, { name: $('#e-name').value, expectedParticipants: Number($('#e-expected').value) }),
     'Reunião atualizada.',
   );
 });
 
-$('#btn-backup').addEventListener('click', async (ev) => {
-  const r = await action(ev.currentTarget, () => api(mpath('/backup'), { method: 'POST' }), 'Backup criado no servidor.');
-  if (r) setText('#backup-info', `Último backup: data/backups/${meetingId}/${r.file}`);
-});
+$('#exp-json').addEventListener('click', (ev) =>
+  action(
+    ev.currentTarget,
+    async () => download(fileName('json'), 'application/json', JSON.stringify(await db.exportMeeting(meetingId), null, 2)),
+    'Exportação JSON gerada.',
+  ),
+);
+
+$('#exp-csv').addEventListener('click', (ev) =>
+  action(
+    ev.currentTarget,
+    async () => {
+      const doc = await db.exportMeeting(meetingId);
+      download(fileName('csv'), 'text/csv;charset=utf-8', resultsCsv(doc.meeting, doc.results));
+    },
+    'Exportação CSV gerada.',
+  ),
+);
 
 $('#btn-archive').addEventListener('click', async (ev) => {
   const btn = ev.currentTarget;
@@ -591,7 +622,7 @@ $('#btn-archive').addEventListener('click', async (ev) => {
     confirmLabel: 'Encerrar reunião',
     danger: true,
   });
-  if (ok) action(btn, () => api(mpath('/archive'), { method: 'POST' }), 'Reunião encerrada.');
+  if (ok) action(btn, () => db.archiveMeeting(meetingId), 'Reunião encerrada.');
 });
 
 for (const b of document.querySelectorAll('[data-copy]')) {
@@ -609,18 +640,25 @@ for (const b of document.querySelectorAll('[data-copy]')) {
 
 // ---------------- Início ----------------
 
-async function boot() {
-  flash('');
-  let session;
-  try {
-    session = await api('/api/admin/session');
-  } catch (e) {
-    return flash(e.message);
+function boot() {
+  if (!db.configured) {
+    show('view-login');
+    flash('Esta publicação ainda não está ligada ao Firebase. Preencha js/firebase-config.js (veja o README).');
+    $('#login-form').hidden = true;
+    return;
   }
-  if (!session.authenticated) return showLogin();
-  $('#logout').hidden = false;
-  if (isMeetingId(meetingId)) openMeeting();
-  else showDashboard();
+  db.watchAdmin(({ user, isAdmin }) => {
+    if (!user) return showLogin();
+    if (!isAdmin) {
+      flash('Esta conta não tem permissão de administrador. Peça para cadastrá-la em /admins no Firebase.');
+      db.signOut().catch(() => {});
+      return;
+    }
+    flash('');
+    $('#logout').hidden = false;
+    if (isMeetingId(meetingId)) openMeeting();
+    else showDashboard();
+  }).catch((e) => flash(e.message));
 }
 
-if (!isRemoteServer) boot();
+boot();

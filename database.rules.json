@@ -1,0 +1,124 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "admins": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": false
+      }
+    },
+
+    "meetings": {
+      ".read": true,
+      "$mid": {
+        ".write": "auth != null && root.child('admins').child(auth.uid).val() === true && newData.exists() && (!data.exists() || data.child('status').val() === 'active')",
+        ".validate": "$mid.matches(/^m_[A-Za-z0-9_-]{12}$/) && newData.hasChildren(['id', 'name', 'status', 'expectedParticipants', 'createdAt', 'updatedAt', 'schemaVersion'])",
+        "id": { ".validate": "newData.val() === $mid" },
+        "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 120" },
+        "status": { ".validate": "newData.val() === 'active' || newData.val() === 'archived'" },
+        "expectedParticipants": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 100000 && newData.val() % 1 === 0" },
+        "createdAt": { ".validate": "newData.isNumber() && (!data.exists() || newData.val() === data.val())" },
+        "updatedAt": { ".validate": "newData.isNumber()" },
+        "archivedAt": { ".validate": "newData.isNumber() && newData.parent().child('status').val() === 'archived'" },
+        "schemaVersion": { ".validate": "newData.val() === 3" },
+        "currentOfficeId": { ".validate": "newData.isString() && newData.parent().child('offices').child(newData.val()).exists()" },
+        "offices": {
+          "$oid": {
+            ".validate": "$oid.matches(/^o_[A-Za-z0-9_-]{12}$/) && newData.hasChildren(['id', 'title', 'status', 'resultsMode', 'resultsPublished', 'createdAt'])",
+            "id": { ".validate": "newData.val() === $oid" },
+            "title": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 120 && (!data.exists() || newData.val() === data.val() || data.parent().child('status').val() === 'draft' || data.parent().child('status').val() === 'discussing')"
+            },
+            "description": {
+              ".validate": "newData.isString() && newData.val().length <= 500 && (!data.exists() || newData.val() === data.val() || data.parent().child('status').val() === 'draft' || data.parent().child('status').val() === 'discussing')"
+            },
+            "status": {
+              ".validate": "(newData.val() === 'draft' || newData.val() === 'discussing' || newData.val() === 'voting_open' || newData.val() === 'closed') && (!data.exists() || newData.val() === data.val() || (data.val() === 'draft' && newData.val() === 'discussing') || (data.val() === 'discussing' && newData.val() === 'voting_open') || (data.val() === 'voting_open' && newData.val() === 'closed'))"
+            },
+            "resultsMode": {
+              ".validate": "(newData.val() === 'on_publish' || newData.val() === 'on_close' || newData.val() === 'live') && (!data.exists() || newData.val() === data.val() || data.parent().child('status').val() !== 'closed')"
+            },
+            "resultsPublished": {
+              ".validate": "newData.isBoolean() && (!data.exists() || data.val() === false || newData.val() === true) && (newData.val() === false || newData.parent().child('status').val() === 'closed')"
+            },
+            "createdAt": { ".validate": "newData.isNumber() && (!data.exists() || newData.val() === data.val())" },
+            "updatedAt": { ".validate": "newData.isNumber()" },
+            "startedAt": { ".validate": "newData.isNumber() && (!data.exists() || newData.val() === data.val())" },
+            "openedAt": { ".validate": "newData.isNumber() && (!data.exists() || newData.val() === data.val())" },
+            "closedAt": { ".validate": "newData.isNumber() && (!data.exists() || newData.val() === data.val())" },
+            "publishedAt": { ".validate": "newData.isNumber() && (!data.exists() || newData.val() === data.val())" },
+            "candidates": {
+              "$cid": {
+                ".validate": "$cid.matches(/^c_[A-Za-z0-9_-]{12}$/) && newData.hasChildren(['id', 'name', 'order']) && (!data.parent().parent().exists() || data.parent().parent().child('status').val() === 'draft' || data.parent().parent().child('status').val() === 'discussing' || (data.exists() && newData.child('name').val() === data.child('name').val() && newData.child('order').val() === data.child('order').val()))",
+                "id": { ".validate": "newData.val() === $cid" },
+                "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 120" },
+                "order": { ".validate": "newData.isNumber()" },
+                "createdAt": { ".validate": "newData.isNumber()" },
+                "$other": { ".validate": false }
+              }
+            },
+            "$other": { ".validate": false }
+          }
+        },
+        "$other": { ".validate": false }
+      }
+    },
+
+    "counts": {
+      ".read": true,
+      "$mid": {
+        "$oid": {
+          ".write": "newData.exists() && root.child('meetings').child($mid).child('status').val() === 'active' && root.child('meetings').child($mid).child('currentOfficeId').val() === $oid && root.child('meetings').child($mid).child('offices').child($oid).child('status').val() === 'voting_open'",
+          ".validate": "newData.isNumber() && newData.val() === (data.exists() ? data.val() : 0) + 1"
+        }
+      }
+    },
+
+    "tallies": {
+      "$mid": {
+        ".read": "auth != null && root.child('admins').child(auth.uid).val() === true",
+        "$oid": {
+          ".read": "(auth != null && root.child('admins').child(auth.uid).val() === true) || root.child('meetings').child($mid).child('offices').child($oid).child('resultsPublished').val() === true || (root.child('meetings').child($mid).child('offices').child($oid).child('resultsMode').val() === 'live' && root.child('meetings').child($mid).child('offices').child($oid).child('status').val() === 'voting_open')",
+          "$choice": {
+            ".write": "newData.exists() && root.child('meetings').child($mid).child('status').val() === 'active' && root.child('meetings').child($mid).child('currentOfficeId').val() === $oid && root.child('meetings').child($mid).child('offices').child($oid).child('status').val() === 'voting_open' && ($choice === 'abstain' || root.child('meetings').child($mid).child('offices').child($oid).child('candidates').child($choice).exists())",
+            ".validate": "newData.isNumber() && newData.val() === (data.exists() ? data.val() : 0) + 1"
+          }
+        }
+      }
+    },
+
+    "receipts": {
+      "$mid": {
+        "$oid": {
+          "$rid": {
+            ".write": "!data.exists() && $rid.matches(/^[A-Za-z0-9_-]{16,64}$/) && root.child('meetings').child($mid).child('status').val() === 'active' && root.child('meetings').child($mid).child('currentOfficeId').val() === $oid && root.child('meetings').child($mid).child('offices').child($oid).child('status').val() === 'voting_open'",
+            ".validate": "newData.val() === now"
+          }
+        }
+      }
+    },
+
+    "results": {
+      "$mid": {
+        ".read": "auth != null && root.child('admins').child(auth.uid).val() === true",
+        "$oid": {
+          ".read": "(auth != null && root.child('admins').child(auth.uid).val() === true) || root.child('meetings').child($mid).child('offices').child($oid).child('resultsPublished').val() === true",
+          ".write": "auth != null && root.child('admins').child(auth.uid).val() === true && !data.exists() && newData.exists()",
+          ".validate": "newData.hasChildren(['result', 'resultHash', 'hashVersion']) && newData.child('resultHash').isString() && newData.child('resultHash').val().matches(/^[0-9a-f]{64}$/) && newData.parent().parent().parent().child('meetings').child($mid).child('offices').child($oid).child('status').val() === 'closed'"
+        }
+      }
+    },
+
+    "log": {
+      "$mid": {
+        ".read": "auth != null && root.child('admins').child(auth.uid).val() === true",
+        "$eid": {
+          ".write": "auth != null && root.child('admins').child(auth.uid).val() === true && !data.exists() && newData.exists()",
+          ".validate": "newData.hasChildren(['type', 'at'])"
+        }
+      }
+    }
+  }
+}

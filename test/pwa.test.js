@@ -1,73 +1,56 @@
 'use strict';
 
+// Verificações estáticas do front-end publicado (PWA, telas, ausência de segredos).
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { startServer, setupMeeting } = require('./helpers');
 
-let srv;
+const PUBLIC = path.join(__dirname, '..', 'public');
+const read = (rel) => fs.readFileSync(path.join(PUBLIC, rel), 'utf8');
+const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
 
-test.before(async () => {
-  srv = await startServer();
-  await srv.client.login();
+test('página inicial: identidade, título e os três acessos principais', () => {
+  const html = read('index.html');
+  assert.match(html, /<title>Nomeia — Sistema de Nomeações e Votações<\/title>/);
+  assert.match(html, /<h1[^>]*>Sistema de Nomeações e Votações<\/h1>/);
+  assert.match(html, /id="go-admin"[\s\S]*Painel Administrativo/);
+  assert.match(html, /id="go-presentation"[\s\S]*Tela de Apresentação/);
+  assert.match(html, /id="go-vote"[\s\S]*Participar da Votação/);
+  assert.match(html, /id="meeting-list"/);
+  const js = read('js/index.js');
+  assert.match(js, /listMeetings\(\)/, 'reuniões vêm do Firebase');
+  assert.match(js, /Nenhuma reunião disponível/);
 });
 
-test.after(() => srv.app.close());
-
-test('página inicial: identidade, título e os três acessos principais', async () => {
-  for (const p of ['/', '/index.html']) {
-    const r = await fetch(srv.base + p);
-    assert.equal(r.status, 200, p);
-    const html = await r.text();
-    assert.match(html, /<title>Nomeia — Sistema de Nomeações e Votações<\/title>/);
-    assert.match(html, /<h1[^>]*>Sistema de Nomeações e Votações<\/h1>/);
-    assert.match(html, /id="go-admin"[\s\S]*Painel Administrativo/);
-    assert.match(html, /id="go-presentation"[\s\S]*Tela de Apresentação/);
-    assert.match(html, /id="go-vote"[\s\S]*Participar da Votação/);
-    assert.match(html, /id="meeting-list"/, 'seletor de reunião');
-    assert.doesNotMatch(html, /README|credencial/i);
+test('manifest instalável com caminhos relativos', () => {
+  const mf = JSON.parse(read('manifest.webmanifest'));
+  assert.equal(mf.display, 'standalone');
+  assert.equal(mf.start_url, './index.html');
+  assert.equal(mf.scope, './');
+  assert.ok(mf.icons.some((i) => i.sizes === '192x192') && mf.icons.some((i) => i.sizes === '512x512'));
+  assert.ok(mf.icons.some((i) => i.purpose === 'maskable'));
+  for (const icon of mf.icons) {
+    assert.doesNotMatch(icon.src, /^\//);
+    assert.ok(fs.existsSync(path.join(PUBLIC, icon.src)), icon.src);
   }
-  const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'index.js'), 'utf8');
-  assert.match(js, /api\('\/api\/meetings'\)/, 'carrega as reuniões disponíveis');
-  assert.match(js, /Nenhuma reunião disponível/, 'orienta a criar uma reunião');
+  assert.ok(fs.existsSync(path.join(PUBLIC, 'icons', 'apple-touch-icon.png')));
 });
 
-test('manifest instalável com caminhos relativos e vinculado à reunião', async () => {
-  const base = await (await fetch(`${srv.base}/manifest.webmanifest`)).json();
-  assert.equal(base.display, 'standalone');
-  assert.equal(base.start_url, './index.html');
-  assert.equal(base.scope, './');
-  const sizes = base.icons.map((i) => i.sizes);
-  assert.ok(sizes.includes('192x192') && sizes.includes('512x512'));
-  assert.ok(base.icons.some((i) => i.purpose === 'maskable'));
-  for (const icon of base.icons) {
-    assert.doesNotMatch(icon.src, /^\//, 'ícone com caminho relativo');
-    assert.equal((await fetch(`${srv.base}/${icon.src}`)).status, 200, icon.src);
-  }
-  const s = await setupMeeting(srv.client);
-  const bound = await (await fetch(`${srv.base}/manifest.webmanifest?m=${s.meetingId}`)).json();
-  assert.equal(bound.start_url, `./votar.html?m=${s.meetingId}`);
-});
-
-test('service worker não armazena API nem enfileira votos; casca com caminhos relativos', async () => {
-  const r = await fetch(`${srv.base}/sw.js`);
-  assert.equal(r.status, 200);
-  const src = await r.text();
+test('service worker: casca local, nunca armazena dados do Firebase nem enfileira votos', () => {
+  const src = read('sw.js');
   assert.match(src, /req\.method !== 'GET'\) return/);
-  assert.match(src, /startsWith\('\/api\/'\)/);
-  assert.match(src, /url\.origin !== self\.location\.origin\) return/, 'API em outra origem nunca é interceptada');
-  assert.doesNotMatch(src, /\bsync\b|SyncManager|indexedDB/i, 'sem background sync nem fila de votos');
+  assert.match(src, /url\.origin !== self\.location\.origin\) return/, 'Firebase/CDN sempre pela rede');
+  assert.doesNotMatch(src, /\bsync\b|SyncManager|indexedDB/i);
   const shell = [...src.matchAll(/'([a-z][^']*\.(?:html|css|js|svg|png))'/g)].map((m) => m[1]);
-  assert.ok(shell.length >= 10);
-  for (const p of shell) assert.equal((await fetch(`${srv.base}/${p}`)).status, 200, p);
+  assert.ok(shell.length >= 15);
+  for (const p of shell) assert.ok(fs.existsSync(path.join(PUBLIC, p)), `casca: ${p}`);
 });
 
-test('páginas principais existem, com HTML semântico e região aria-live', async () => {
+test('telas existem, com HTML semântico e região aria-live', () => {
   for (const page of ['index.html', 'votar.html', 'apresentacao.html', 'admin.html', 'offline.html']) {
-    const r = await fetch(`${srv.base}/${page}`);
-    assert.equal(r.status, 200, page);
-    const html = await r.text();
+    const html = read(page);
     assert.match(html, /<html lang="pt-BR">/);
     assert.match(html, /<main/);
     assert.match(html, /name="viewport"/);
@@ -75,13 +58,40 @@ test('páginas principais existem, com HTML semântico e região aria-live', asy
   }
 });
 
-test('nenhum segredo nem credencial no front-end público', () => {
-  const dir = path.join(__dirname, '..', 'public');
-  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
-  for (const f of walk(dir).filter((x) => /\.(js|html)$/.test(x))) {
+test('nenhum segredo, credencial de participante ou servidor próprio no front-end', () => {
+  for (const f of walk(PUBLIC).filter((x) => /\.(js|html)$/.test(x))) {
     const src = fs.readFileSync(f, 'utf8');
-    assert.doesNotMatch(src, /ADMIN_SECRET\s*[:=]\s*['"][^'"]+/, f);
-    assert.doesNotMatch(src, /segredo-de-teste/, f);
-    assert.doesNotMatch(src, /credentials\/check|Authorization|Bearer|consent-yes|code-input/, `${f}: resquício de credenciais`);
+    const rel = path.relative(PUBLIC, f);
+    assert.doesNotMatch(src, /ADMIN_SECRET|privateKey|private_key|serviceAccount|client_secret/i, rel);
+    assert.doesNotMatch(src, /credentials\/check|Bearer |consent-yes|code-input/, `${rel}: resquício de credenciais`);
+    assert.doesNotMatch(src, /\/api\/|new WebSocket|API_BASE/, `${rel}: resquício do servidor Node`);
+    assert.doesNotMatch(src, /\.innerHTML\s*=|insertAdjacentHTML|eval\(|new Function/, `${rel}: XSS`);
   }
+  const cfg = read('js/firebase-config.js');
+  assert.match(cfg, /export const firebaseConfig = null;/, 'publicação sem projeto configurado não simula dados');
+  assert.match(cfg, /export const emulator = null;/, 'emulador desligado por padrão');
+});
+
+test('votação pública e sem identificação: um voto por confirmação, sem bloqueio local', () => {
+  const votar = read('js/votar.js');
+  assert.match(votar, /castVote\(meetingId, o\.id, selection, requestId\)/);
+  assert.match(votar, /Votar novamente/);
+  assert.doesNotMatch(votar, /localStorage|sessionStorage|document\.cookie/, 'nenhum bloqueio por dispositivo');
+  const db = read('js/db.js');
+  assert.match(db, /receipts\/\$\{meetingId\}\/\$\{officeId\}\/\$\{requestId\}/);
+  assert.match(db, /tallies\/\$\{meetingId\}\/\$\{officeId\}\/\$\{choice\}`\]: d\.increment\(1\)/);
+  assert.match(db, /if \(!connected\) throw new DataError\('network_error'/, 'não enfileira votos offline');
+});
+
+test('painel administrativo depende do Firebase Authentication + regras, não só da interface', () => {
+  const admin = read('js/admin.js');
+  assert.match(admin, /db\.watchAdmin\(/);
+  assert.match(admin, /db\.signIn\(/);
+  const html = read('admin.html');
+  assert.match(html, /id="email"[^>]*type="email"/);
+  assert.match(html, /id="secret"[^>]*type="password"/);
+  const rules = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'database.rules.json'), 'utf8'));
+  assert.match(rules.rules.meetings.$mid['.write'], /root\.child\('admins'\)\.child\(auth\.uid\)\.val\(\) === true/);
+  assert.equal(rules.rules['.write'], false);
+  assert.equal(rules.rules.admins.$uid['.write'], false);
 });

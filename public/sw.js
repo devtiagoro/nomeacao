@@ -1,9 +1,9 @@
 // NOMEIA — service worker.
 // Guarda apenas a "casca" do app (HTML/CSS/JS/ícones) para abrir rápido e mostrar a tela offline.
-// NUNCA armazena respostas de /api nem enfileira votos: o servidor é a única autoridade.
-// Caminhos relativos ao escopo: funciona na raiz do servidor Node e em subpastas (GitHub Pages).
+// NUNCA armazena dados do Firebase nem enfileira votos: o banco é a única autoridade.
+// Caminhos relativos ao escopo: funciona em subpastas (GitHub Pages).
 
-const CACHE = 'nomeia-shell-v3';
+const CACHE = 'nomeia-shell-v4';
 const SHELL = [
   'index.html',
   'votar.html',
@@ -12,7 +12,9 @@ const SHELL = [
   'css/style.css',
   'css/votar.css',
   'css/apresentacao.css',
-  'js/config.js',
+  'js/firebase-config.js',
+  'js/db.js',
+  'js/domain.js',
   'js/common.js',
   'js/index.js',
   'js/votar.js',
@@ -47,9 +49,8 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return; // POST (votos) sempre vai direto à rede.
   const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return; // servidor da API em outra origem: sempre rede
-  if (url.pathname.startsWith('/api/') || url.pathname === '/ws') return; // estado sempre do servidor
-  if (url.pathname.endsWith('/admin.html') || url.pathname.includes('/js/admin')) return;
+  if (url.origin !== self.location.origin) return; // Firebase, SDK e CDN: sempre rede, nunca cache
+  if (url.pathname.endsWith('admin.html') || url.pathname.includes('js/admin')) return; // painel: sempre rede
 
   if (req.mode === 'navigate') {
     // Rede primeiro: sempre a versão mais nova da página; offline mostra tela amigável.

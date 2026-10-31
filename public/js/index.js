@@ -1,5 +1,4 @@
 import {
-  api,
   el,
   $,
   icon,
@@ -7,12 +6,11 @@ import {
   isMeetingId,
   registerServiceWorker,
   setupOfflineBar,
-  adminUrl,
-  serverMissing,
   STATUS_LABEL,
   emptyState,
   setText,
 } from './common.js';
+import { configured, listMeetings } from './db.js';
 
 registerServiceWorker();
 setupOfflineBar();
@@ -27,7 +25,6 @@ if (standalone && isMeetingId(selected) && !params.has('home')) {
   location.replace(`votar.html?m=${encodeURIComponent(selected)}`);
 }
 
-$('#go-admin').href = adminUrl();
 
 function setConn(kind, text) {
   const c = $('#conn');
@@ -71,7 +68,7 @@ function renderList() {
         iconName: 'calendar',
         title: 'Nenhuma reunião disponível',
         text: 'O administrador deve criar uma reunião no Painel Administrativo. Ela aparecerá aqui automaticamente.',
-        action: el('a', { class: 'btn btn-primary', href: adminUrl() }, icon('shield'), 'Abrir Painel Administrativo'),
+        action: el('a', { class: 'btn btn-primary', href: 'admin.html' }, icon('shield'), 'Abrir Painel Administrativo'),
       }),
     );
     return;
@@ -99,30 +96,30 @@ function renderList() {
 }
 
 async function load() {
-  if (serverMissing) {
-    setConn('offline', 'Servidor não configurado');
+  if (!configured) {
+    setConn('offline', 'Firebase não configurado');
     const note = $('#server-note');
     note.replaceChildren(
       icon('alert'),
       el(
         'span',
         {},
-        'Esta publicação estática ainda não está ligada ao servidor do NOMEIA. Informe a URL do servidor em js/config.js (veja o README, seção GitHub Pages).',
+        'Esta publicação ainda não está ligada ao Firebase. Preencha js/firebase-config.js com os dados do seu projeto (veja o README, seção "Configuração do Firebase").',
       ),
     );
     note.hidden = false;
     meetings = [];
     $('#meeting-list').replaceChildren(
-      emptyState({ iconName: 'wifi-off', title: 'Servidor indisponível', text: 'As reuniões aparecem aqui quando o servidor estiver configurado.' }),
+      emptyState({ iconName: 'wifi-off', title: 'Serviço de dados não configurado', text: 'As reuniões aparecem aqui quando o Firebase estiver configurado.' }),
     );
     updateLinks();
     return;
   }
   try {
-    meetings = await api('/api/meetings');
-    setConn('online', 'Servidor conectado');
+    meetings = await listMeetings();
+    setConn('online', 'Conectado');
   } catch (e) {
-    setConn('offline', 'Servidor indisponível');
+    setConn('offline', 'Sem conexão');
     meetings = [];
     const retry = el('button', { class: 'btn btn-secondary', type: 'button' }, icon('refresh'), 'Tentar novamente');
     retry.addEventListener('click', load);

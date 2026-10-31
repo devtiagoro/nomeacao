@@ -53,9 +53,13 @@
           <p class="muted small">Acesso restrito à mesa da reunião.</p>
           <form id="login-form" class="mt-6">
             <div class="field">
-              <label for="secret">Segredo administrativo</label>
+              <label for="email">E-mail</label>
+              <input id="email" type="email" autocomplete="username" required maxlength="254" />
+            </div>
+            <div class="field">
+              <label for="secret">Senha</label>
               <input id="secret" type="password" autocomplete="current-password" required maxlength="512" />
-              <p class="hint">Definido no servidor (ADMIN_SECRET). Nunca é guardado no navegador.</p>
+              <p class="hint">Conta da mesa criada no Firebase Authentication e autorizada em /admins.</p>
             </div>
             <button class="btn btn-primary btn-lg btn-block" type="submit">Entrar</button>
           </form>
@@ -100,7 +104,7 @@
             <div class="card-header">
               <div>
                 <h2 id="import-title"><span data-icon="upload"></span>Importar</h2>
-                <p class="card-subtitle">Arquivo JSON exportado pelo Nomeia ou backup de data/backups. Nunca sobrescreve reuniões existentes.</p>
+                <p class="card-subtitle">Arquivo JSON exportado pelo Nomeia (inclusive backups da versão anterior com servidor). Nunca sobrescreve reuniões existentes.</p>
               </div>
             </div>
             <form id="import-form">
@@ -350,20 +354,16 @@
               <h2 id="exp-title"><span data-icon="database"></span>Exportação e backup</h2>
             </div>
             <div class="export-grid">
-              <a id="exp-json" class="export-item" download>
+              <button id="exp-json" class="export-item" type="button">
                 <span class="ei-icon" data-icon="download"></span>
                 <span><strong>Exportar JSON</strong><small>Backup completo, reimportável</small></span>
-              </a>
-              <a id="exp-csv" class="export-item" download>
+              </button>
+              <button id="exp-csv" class="export-item" type="button">
                 <span class="ei-icon" data-icon="download"></span>
                 <span><strong>Exportar CSV</strong><small>Resultados de todos os cargos</small></span>
-              </a>
-              <button id="btn-backup" class="export-item" type="button">
-                <span class="ei-icon" data-icon="database"></span>
-                <span><strong>Criar backup no servidor</strong><small>Cópia versionada em data/backups</small></span>
               </button>
             </div>
-            <p id="backup-info" class="hint mt-3"></p>
+            <p class="hint mt-3">Os dados ficam no Firebase. Guarde uma exportação JSON ao fim de cada reunião como cópia de segurança.</p>
           </section>
 
           <!-- Zona de risco -->

@@ -102,7 +102,7 @@ test('navegação gerada pelo JavaScript usa caminhos relativos', () => {
     ...fs.readdirSync(PUBLIC).filter((f) => f.endsWith('.html')).map((f) => path.join(PUBLIC, f)),
     ...fs.readdirSync(path.join(PUBLIC, 'css')).map((f) => path.join(PUBLIC, 'css', f)),
   ];
-  const absolute = /['"`(]\/(?!api\/|ws\b|\/)[A-Za-z0-9_.-]+\.(?:html|js|css|png|svg|webmanifest)\b/;
+  const absolute = /['"`(]\/(?!\/)[A-Za-z0-9_.-]+\.(?:html|js|css|png|svg|webmanifest)\b/;
   for (const f of files) {
     const lines = fs.readFileSync(f, 'utf8').split('\n');
     lines.forEach((line, i) => assert.doesNotMatch(line, absolute, `${path.relative(ROOT, f)}:${i + 1}: ${line.trim()}`));
@@ -111,13 +111,14 @@ test('navegação gerada pelo JavaScript usa caminhos relativos', () => {
   for (const p of ['votar.html', 'apresentacao.html']) assert.match(pagesUsed, new RegExp(`\`${p.replace('.', '\\.')}`));
 });
 
-test('sem servidor configurado, o GitHub Pages mostra aviso em vez de dados falsos', () => {
-  const cfg = fs.readFileSync(path.join(PUBLIC, 'js', 'config.js'), 'utf8');
-  assert.match(cfg, /export const API_BASE = '';/);
-  const common = fs.readFileSync(path.join(PUBLIC, 'js', 'common.js'), 'utf8');
-  assert.match(common, /serverMissing = !SERVER && \/\\\.github\\\.io\$\/i\.test\(location\.hostname\)/);
-  assert.match(common, /server_not_configured/);
-  // O painel administrativo sempre roda no servidor Node (sessão segura), nunca no Pages.
-  const admin = fs.readFileSync(path.join(PUBLIC, 'js', 'admin.js'), 'utf8');
-  assert.match(admin, /if \(isRemoteServer\) location\.replace\(adminUrl\(location\.search\)\)/);
+test('sem Firebase configurado, as telas mostram aviso em vez de dados falsos', () => {
+  const db = fs.readFileSync(path.join(PUBLIC, 'js', 'db.js'), 'utf8');
+  assert.match(db, /export const configured = Boolean\(firebaseConfig && firebaseConfig\.apiKey && firebaseConfig\.databaseURL\)/);
+  assert.match(db, /new DataError\('not_configured'/);
+  for (const page of ['index.js', 'votar.js', 'apresentacao.js', 'admin.js']) {
+    assert.match(fs.readFileSync(path.join(PUBLIC, 'js', page), 'utf8'), /configured/, `${page} verifica a configuração`);
+  }
+  // Apenas o SDK oficial do Firebase e a biblioteca de QR Code vêm de CDN, com versão fixa.
+  assert.match(db, /https:\/\/www\.gstatic\.com\/firebasejs\/12\.19\.0/);
+  assert.match(db, /https:\/\/cdn\.jsdelivr\.net\/npm\/qrcode@1\.5\.4\/\+esm/);
 });

@@ -1,20 +1,5 @@
-import {
-  api,
-  el,
-  $,
-  setText,
-  announce,
-  connectLive,
-  isMeetingId,
-  statusChip,
-  renderResults,
-  STATUS_LABEL,
-  registerServiceWorker,
-  icon,
-  apiUrl,
-  serverMissing,
-  storage,
-} from './common.js';
+import { el, $, setText, announce, isMeetingId, statusChip, renderResults, STATUS_LABEL, registerServiceWorker, icon, storage } from './common.js';
+import { configured, watchMeeting, watchConnection, qrDataUrl, pageUrl } from './db.js';
 
 registerServiceWorker();
 
@@ -129,17 +114,21 @@ if (!isMeetingId(meetingId)) {
   location.replace('index.html');
 } else {
   storage.rememberMeeting(meetingId);
-  if (!serverMissing) $('#qr').src = apiUrl(`/api/meetings/${meetingId}/qr.svg`);
-  api(`/api/meetings/${meetingId}/link`)
-    .then((r) => setText('#public-link', r.publicUrl))
-    .catch(() => setText('#public-link', new URL(`votar.html?m=${meetingId}`, location.href).href));
-  connectLive({
-    meetingId,
-    onState: render,
-    onStatus: (st) => statusChip($('#conn'), st),
-    onFatal: (reason) =>
-      fail(reason === 'server_not_configured' ? 'Esta publicação ainda não está ligada a um servidor do NOMEIA (js/config.js).' : 'Reunião não encontrada.'),
-  });
+  // O link público é o próprio endereço publicado (ex.: GitHub Pages) da tela de votação.
+  const publicUrl = pageUrl('votar.html', meetingId);
+  setText('#public-link', publicUrl);
+  qrDataUrl(publicUrl)
+    .then((src) => {
+      $('#qr').src = src;
+    })
+    .catch(() => {});
+  if (!configured) {
+    fail('Esta publicação ainda não está ligada ao Firebase (js/firebase-config.js).');
+  } else {
+    watchConnection((st) => statusChip($('#conn'), st))
+      .then(() => watchMeeting(meetingId, {}, render, (reason) => fail(reason === 'not_found' ? 'Reunião não encontrada.' : 'Acesso negado.')))
+      .catch((e) => fail(e.message));
+  }
 }
 
 $('#fullscreen').addEventListener('click', () => {

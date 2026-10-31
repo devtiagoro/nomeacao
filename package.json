@@ -1,22 +1,23 @@
 {
   "name": "nomeia",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "NOMEIA — nomeações e votações de cargos em reuniões presenciais (PWA + Node.js + JSON).",
-  "main": "server.js",
+  "description": "NOMEIA — nomeações e votações em reuniões presenciais. App estático (PWA) + Firebase Realtime Database.",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=20.10"
   },
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "test": "node --test --test-reporter=spec \"test/**/*.test.js\"",
-    "simulate": "node scripts/simulate-votes.js",
+    "start": "node scripts/serve.js",
+    "emulators": "firebase emulators:start --only database,auth --project demo-nomeia",
+    "test": "node --test --test-reporter=spec \"test/*.test.js\"",
+    "test:rules": "firebase emulators:exec --only database --project demo-nomeia \"node --test --test-reporter=spec test/rules/database.rules.test.js\"",
+    "deploy:rules": "firebase deploy --only database",
     "icons": "node scripts/gen-icons.js"
   },
-  "dependencies": {
-    "qrcode": "1.5.4",
-    "ws": "8.22.1"
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.2",
+    "firebase": "12.19.0",
+    "firebase-tools": "15.34.2"
   }
 }

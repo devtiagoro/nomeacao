@@ -1,10 +1,8 @@
 import {
-  api,
   el,
   $,
   setText,
   announce,
-  connectLive,
   storage,
   isMeetingId,
   setupOfflineBar,
@@ -17,6 +15,7 @@ import {
   emptyState,
   confirmDialog,
 } from './common.js';
+import { configured, castVote, watchMeeting, watchConnection } from './db.js';
 
 registerServiceWorker();
 setupOfflineBar();
@@ -53,6 +52,9 @@ function newRequestId() {
   crypto.getRandomValues(bytes);
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
+
+// Confirmações já enviadas ao menos uma vez (memória da tela; não limita novos votos).
+const attempted = new Set();
 
 function bindMeeting(id) {
   meetingId = id;
@@ -206,16 +208,22 @@ async function submitVote(o) {
   pendingRequestId = requestId;
   let keepChoice = false;
   try {
-    await api(`/api/meetings/${encodeURIComponent(meetingId)}/votes`, {
-      method: 'POST',
-      body: { officeId: o.id, choice: selection, requestId },
-    });
+    const retry = attempted.has(requestId);
+    attempted.add(requestId);
+    try {
+      await castVote(meetingId, o.id, selection, requestId);
+    } catch (e) {
+      // Reenvio recusado com a votação ainda aberta: o recibo já existia, ou seja,
+      // a tentativa anterior foi registrada (falhou só a resposta). Não conta de novo.
+      const stillOpen = state?.currentOffice?.id === o.id && state.currentOffice.status === 'voting_open';
+      if (!(e.code === 'rejected' && retry && stillOpen)) throw e;
+    }
     justVoted = { officeId: o.id, name: chosenName(o) };
     flash = null;
     pendingRequestId = null;
     announce('Seu voto foi registrado.', { assertive: true });
   } catch (e) {
-    if (e.code === 'network_error' || e.status >= 500 || e.status === 429) {
+    if (e.code === 'network_error') {
       // Mantém escolha e requestId: ao tentar de novo, o servidor reconhece se já tinha registrado.
       keepChoice = true;
       flash = { kind: 'error', text: `${e.message} Toque em "Confirmar meu voto" para tentar novamente.` };
@@ -365,24 +373,23 @@ function render() {
   } else turnout.replaceChildren();
 }
 
-function startLive() {
-  connectLive({
-    meetingId,
-    onState: (s, type) => {
-      state = s;
-      announceEvent(type, s);
-      render();
-    },
-    onStatus: (st) => statusChip($('#conn'), st),
-    onFatal: (reason) =>
-      fatal(
-        reason === 'not_found'
-          ? 'Reunião não encontrada. Confira o link ou o QR Code.'
-          : reason === 'server_not_configured'
-            ? 'Esta publicação ainda não está ligada a um servidor do NOMEIA.'
-            : 'Acesso negado.',
-      ),
-  });
+async function startLive() {
+  if (!configured) return fatal('Esta publicação ainda não está ligada ao Firebase (js/firebase-config.js).');
+  try {
+    await watchConnection((st) => statusChip($('#conn'), st));
+    await watchMeeting(
+      meetingId,
+      {},
+      (s, type) => {
+        state = s;
+        announceEvent(type, s);
+        render();
+      },
+      (reason) => fatal(reason === 'not_found' ? 'Reunião não encontrada. Confira o link ou o QR Code.' : 'Acesso negado.'),
+    );
+  } catch (e) {
+    fatal(e.message);
+  }
 }
 
 function init() {

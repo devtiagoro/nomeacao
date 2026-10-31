@@ -4,18 +4,16 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "NOMEIA: servidor",
-      "program": "${workspaceFolder}/server.js",
-      "console": "integratedTerminal",
-      "skipFiles": ["<node_internals>/**"]
+      "name": "Nomeia: pré-visualização estática",
+      "program": "${workspaceFolder}/scripts/serve.js",
+      "console": "integratedTerminal"
     },
     {
       "type": "node",
       "request": "launch",
-      "name": "NOMEIA: testes",
-      "runtimeArgs": ["--test", "--test-reporter=spec", "test/**/*.test.js"],
-      "console": "integratedTerminal",
-      "skipFiles": ["<node_internals>/**"]
+      "name": "Nomeia: testes",
+      "runtimeArgs": ["--test", "--test-reporter=spec", "test/*.test.js"],
+      "console": "integratedTerminal"
     }
   ]
 }
