@@ -56,27 +56,6 @@
   display: none;
 }
 
-/* ---------- Login ---------- */
-.login-wrap {
-  display: grid;
-  place-items: center;
-  min-height: calc(100dvh - 180px);
-}
-
-.login-card {
-  width: min(420px, 100%);
-  padding: var(--space-8);
-}
-
-.login-card h1 {
-  margin: var(--space-4) 0 var(--space-1);
-  font-size: var(--text-xl);
-}
-
-.login-card .btn {
-  margin-top: var(--space-5);
-}
-
 /* ---------- Dashboard ---------- */
 .dash-grid {
   display: grid;

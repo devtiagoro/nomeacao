@@ -71,11 +71,8 @@ export function reset() {
 
 export const dump = () => clone(root);
 
-// --- firebase-app / firebase-auth (o mínimo) ---
+// --- firebase-app (o mínimo) ---
 export const initializeApp = () => ({});
-export const getAuth = () => ({});
-export const connectAuthEmulator = () => {};
-export const onAuthStateChanged = (auth, cb) => (cb(null), () => {});
 
 // --- firebase-database ---
 export const getDatabase = () => ({});

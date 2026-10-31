@@ -2,8 +2,8 @@ import { el, $, setText, announce, statusChip, renderResults, STATUS_LABEL, fmtD
 import * as db from './db.js';
 import { resultsCsv, VOTE_TYPE_LABEL } from './domain.js';
 
-// A segurança NÃO depende desta tela: toda gravação é verificada pelas regras do Firebase
-// (database.rules.json), que só aceitam contas cadastradas em /admins.
+// Toda gravação é validada pelas regras do Firebase (database.rules.json). Sem autenticação,
+// qualquer pessoa com acesso ao painel também pode executar as ações administrativas permitidas.
 
 let meetingId = null;
 let stopMeeting = null;
@@ -27,9 +27,9 @@ function flash(text) {
 }
 
 function show(view) {
-  for (const id of ['view-login', 'view-setup', 'view-meeting']) $(`#${id}`).hidden = id !== view;
+  for (const id of ['view-setup', 'view-meeting']) $(`#${id}`).hidden = id !== view;
   $('#hdr-meeting').hidden = view !== 'view-meeting';
-  $('#hdr-presentation').hidden = view === 'view-login';
+  $('#hdr-presentation').hidden = false;
 }
 
 /** Executa uma ação com botão em estado de carregamento e erro amigável. */
@@ -44,7 +44,7 @@ async function action(btn, fn, okMsg) {
     if (okMsg) toast(okMsg);
     return r ?? true;
   } catch (e) {
-    flash(e.code === 'permission_denied' ? 'Operação recusada pelas regras de segurança. Confira se a sua conta é administradora.' : e.message);
+    flash(e.code === 'permission_denied' ? 'Operação recusada pelas regras de segurança do banco.' : e.message);
     return undefined;
   } finally {
     if (btn) {
@@ -73,16 +73,6 @@ function changed(name, value) {
   keys[name] = k;
   return true;
 }
-
-// ---------------- Login ----------------
-
-$('#login-form').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  await action(ev.submitter, () => db.signIn($('#email').value.trim(), $('#secret').value));
-  $('#secret').value = '';
-});
-
-$('#logout').addEventListener('click', () => db.signOut().catch(() => {}));
 
 // ---------------- Nova reunião / reuniões anteriores ----------------
 
@@ -150,7 +140,7 @@ async function follow(id) {
       state = s;
       renderMeeting();
     },
-    (reason) => flash(reason === 'not_found' ? 'Reunião não encontrada.' : 'Acesso negado: esta conta não é administradora.'),
+    (reason) => flash(reason === 'not_found' ? 'Reunião não encontrada.' : 'Acesso aos dados recusado pelas regras do banco.'),
   );
   if (meetingId === id) stopMeeting = stop;
   else stop();
@@ -436,8 +426,7 @@ $('#copy-url').addEventListener('click', async () => {
 
 function boot() {
   if (!db.configured) {
-    show('view-login');
-    $('#login-form').hidden = true;
+    show('view-setup');
     flash('Firebase não configurado: preencha public/js/firebase-config.js (veja o README).');
     return;
   }
@@ -449,23 +438,12 @@ function boot() {
     })
     .catch(() => {});
   db.watchConnection((st) => statusChip($('#conn'), st)).catch(() => {});
-  db.watchAdmin(async ({ user, isAdmin }) => {
-    stopCurrent?.();
-    stopCurrent = null;
-    if (!user || !isAdmin) {
-      leave();
-      show('view-login');
-      $('#logout').hidden = $('#conn').hidden = true;
-      if (user) {
-        flash('Esta conta não tem permissão de administrador (cadastre o UID em /admins no Firebase).');
-        db.signOut().catch(() => {});
-      }
-      return;
-    }
-    flash('');
-    $('#logout').hidden = $('#conn').hidden = false;
-    stopCurrent = await db.watchCurrent((id) => follow(id).catch((e) => flash(e.message)));
-  }).catch((e) => flash(e.message));
+  $('#conn').hidden = false;
+  db.watchCurrent((id) => follow(id).catch((e) => flash(e.message)))
+    .then((stop) => {
+      stopCurrent = stop;
+    })
+    .catch((e) => flash(e.message));
 }
 
 boot();

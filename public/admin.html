@@ -30,34 +30,11 @@
         <a id="hdr-presentation" class="btn btn-secondary btn-sm" href="apresentacao.html" target="_blank" rel="noopener" hidden title="Abrir apresentação">
           <span data-icon="monitor"></span><span class="label">Apresentação</span>
         </a>
-        <button id="logout" class="btn btn-ghost btn-sm" type="button" hidden title="Sair">
-          <span data-icon="logout"></span><span class="label">Sair</span>
-        </button>
       </nav>
     </header>
 
     <main id="main" class="container admin-main" tabindex="-1">
       <div id="flash" role="alert"></div>
-
-      <!-- ===================== LOGIN ===================== -->
-      <section id="view-login" class="login-wrap" hidden aria-labelledby="login-title">
-        <div class="card login-card">
-          <div class="entry-icon"><span data-icon="shield"></span></div>
-          <h1 id="login-title">Administração</h1>
-          <p class="muted small">Acesso restrito a quem conduz a reunião.</p>
-          <form id="login-form" class="mt-6">
-            <div class="field">
-              <label for="email">E-mail</label>
-              <input id="email" type="email" autocomplete="username" required maxlength="254" />
-            </div>
-            <div class="field">
-              <label for="secret">Senha</label>
-              <input id="secret" type="password" autocomplete="current-password" required maxlength="512" />
-            </div>
-            <button class="btn btn-primary btn-lg btn-block" type="submit">Entrar</button>
-          </form>
-        </div>
-      </section>
 
       <!-- ===================== NOVA REUNIÃO / REUNIÕES ANTERIORES ===================== -->
       <section id="view-setup" class="stack-lg" hidden>

@@ -34,24 +34,22 @@ let connected = false;
 function load() {
   if (!configured) return Promise.reject(new DataError('not_configured', 'Firebase não configurado (js/firebase-config.js).'));
   loading ??= (async () => {
-    let appM, d, a;
+    let appM, d;
     try {
-      [appM, d, a] = await Promise.all([import(`${SDK}/firebase-app.js`), import(`${SDK}/firebase-database.js`), import(`${SDK}/firebase-auth.js`)]);
+      [appM, d] = await Promise.all([import(`${SDK}/firebase-app.js`), import(`${SDK}/firebase-database.js`)]);
     } catch {
       loading = null;
       throw new DataError('network_error', OFFLINE);
     }
     const app = appM.initializeApp(firebaseConfig);
     const db = d.getDatabase(app);
-    const auth = a.getAuth(app);
     if (emulator) {
       d.connectDatabaseEmulator(db, emulator.host, emulator.databasePort);
-      a.connectAuthEmulator(auth, `http://${emulator.host}:${emulator.authPort}`, { disableWarnings: true });
     }
     d.onValue(d.ref(db, '.info/connected'), (s) => {
       connected = s.val() === true;
     });
-    return { d, a, db, auth };
+    return { d, db };
   })();
   return loading;
 }
@@ -243,38 +241,6 @@ export async function castBallot(meetingId, officeId, choices, requestId) {
 }
 
 // ---------------- Administração ----------------
-
-/** Acompanha a sessão: { user, isAdmin }. isAdmin vem de /admins/{uid} (só o próprio usuário lê). */
-export async function watchAdmin(cb) {
-  const { d, a, db, auth } = await load();
-  return a.onAuthStateChanged(auth, async (user) => {
-    if (!user) return cb({ user: null, isAdmin: false });
-    let isAdmin = false;
-    try {
-      isAdmin = (await d.get(d.ref(db, `admins/${user.uid}`))).val() === true;
-    } catch {
-      isAdmin = false;
-    }
-    cb({ user, isAdmin });
-  });
-}
-
-export async function signIn(email, password) {
-  const { a, auth } = await load();
-  try {
-    await a.signInWithEmailAndPassword(auth, email, password);
-  } catch (e) {
-    const code = String(e?.code || '');
-    if (/invalid-credential|wrong-password|user-not-found|invalid-email/.test(code)) throw new DataError('invalid_login', 'E-mail ou senha incorretos.');
-    if (/too-many-requests/.test(code)) throw new DataError('rate_limited', 'Muitas tentativas. Aguarde alguns minutos.');
-    throw new DataError('network_error', OFFLINE);
-  }
-}
-
-export async function signOut() {
-  const { a, auth } = await load();
-  await a.signOut(auth);
-}
 
 const ts = (d) => d.serverTimestamp();
 

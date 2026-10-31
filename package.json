@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node scripts/serve.js",
-    "emulators": "firebase emulators:start --only database,auth --project demo-nomeia",
+    "emulators": "firebase emulators:start --only database --project demo-nomeia",
     "test": "node --test --test-reporter=spec \"test/*.test.js\"",
     "test:rules": "firebase emulators:exec --only database --project demo-nomeia \"node --test --test-reporter=spec test/rules/database.rules.test.js\"",
     "deploy:rules": "firebase deploy --only database"
