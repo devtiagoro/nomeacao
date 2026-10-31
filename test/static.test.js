@@ -68,24 +68,25 @@ test('votação pública: sem login nem bloqueio por aparelho; segue a reunião 
   assert.match(db, /if \(!connected\) throw new DataError\('network_error'/, 'não enfileira votos offline');
 });
 
-test('administração depende do Firebase Authentication + regras, não só da interface', () => {
+test('administração pública usa somente Realtime Database e continua limitada pelas regras', () => {
   const admin = read('js/admin.js');
-  assert.match(admin, /db\.watchAdmin\(/);
-  assert.match(admin, /db\.signIn\(/);
+  const db = read('js/db.js');
+  assert.doesNotMatch(admin, /watchAdmin|signIn|signOut|login-form|logout/);
+  assert.doesNotMatch(db, /firebase-auth|getAuth|connectAuthEmulator|onAuthStateChanged|signInWithEmailAndPassword|signOut/);
   for (const fn of ['presentOffice', 'openVoting', 'closeVoting', 'createOffice', 'addCandidate', 'renameCandidate', 'removeCandidate', 'exportMeeting']) {
     assert.match(admin, new RegExp(`db\\.${fn}\\(`), fn);
   }
   const html = read('admin.html');
-  assert.match(html, /id="email"[^>]*type="email"/);
-  assert.match(html, /id="secret"[^>]*type="password"/);
+  assert.doesNotMatch(html, /view-login|login-form|type="email"|type="password"|id="logout"/);
   assert.match(html, /name="o-type" value="single"/);
   assert.match(html, /name="o-type" value="multiple"/);
   const rules = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'database.rules.json'), 'utf8')).rules;
-  const isAdmin = /root\.child\('admins'\)\.child\(auth\.uid\)\.val\(\) === true/;
+  assert.equal(rules['.read'], false);
   assert.equal(rules['.write'], false);
-  assert.equal(rules.admins.$uid['.write'], false);
-  assert.match(rules.current['.write'], isAdmin);
-  assert.match(rules.meetings.$mid['.write'], isAdmin);
-  assert.match(rules.meetings.$mid.offices.$oid['.write'], isAdmin);
+  assert.equal(rules.admins, undefined);
+  assert.doesNotMatch(JSON.stringify(rules), /auth|admins|uid/i);
+  assert.match(rules.current['.write'], /newData\.parent\(\)\.child\('meetings'\)/);
+  assert.match(rules.meetings.$mid['.write'], /!data\.exists\(\)/);
+  assert.match(rules.meetings.$mid.offices.$oid['.write'], /newData\.hasChildren/);
   assert.match(rules.meetings.$mid.offices.$oid['.write'], /data\.child\('status'\)\.val\(\) !== 'closed'/, 'cargo encerrado é definitivo');
 });

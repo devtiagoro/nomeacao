@@ -11,7 +11,6 @@
 
 export const firebaseConfig = {
   apiKey: 'AIzaSyD0-y3cCLCousVz9x8ryEmSsGMob0f-p0',
-  authDomain: 'nomeacao-905ed.firebaseapp.com',
   databaseURL: 'https://nomeacao-905ed-default-rtdb.firebaseio.com',
   projectId: 'nomeacao-905ed',
   storageBucket: 'nomeacao-905ed.firebasestorage.app',
@@ -23,7 +22,6 @@ export const firebaseConfig = {
 /* Exemplo (substitua pelos valores do seu projeto):
 export const firebaseConfig = {
   apiKey: 'AIza...',
-  authDomain: 'seu-projeto.firebaseapp.com',
   databaseURL: 'https://console.firebase.google.com/u/0/project/nomeacao-905ed/database/nomeacao-905ed-default-rtdb/data/~2F?hl=pt-br',
   projectId: 'seu-projeto',
   appId: '1:000000000000:web:0000000000000000',

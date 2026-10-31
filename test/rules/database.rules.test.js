@@ -56,13 +56,11 @@ function meeting(officeStatus = 'voting_open', officeExtra = {}) {
 async function seed(data) {
   await env.clearDatabase();
   await env.withSecurityRulesDisabled(async (ctx) => {
-    await ctx.database().ref().set({ admins: { admin1: true }, ...data });
+    await ctx.database().ref().set(data);
   });
 }
 
 const publicDb = () => env.unauthenticatedContext().database();
-const adminDb = () => env.authenticatedContext('admin1').database();
-const strangerDb = () => env.authenticatedContext('qualquer-pessoa').database();
 const rid = () => require('node:crypto').randomBytes(16).toString('hex');
 
 /** A cédula exatamente como o navegador envia: uma atualização atômica. */
@@ -90,26 +88,20 @@ test.before(async () => {
 
 test.after(() => env?.cleanup());
 
-test('participante (sem login) lê reunião e reunião atual, mas não altera nada', async () => {
+test('sem login, leituras públicas funcionam e escritas fora da estrutura são recusadas', async () => {
   await seed({ meetings: { [M]: meeting('discussing') }, current: M });
   const db = publicDb();
   await assertSucceeds(db.ref(`meetings/${M}`).once('value'));
   await assertSucceeds(db.ref('current').once('value'));
   await assertFails(db.ref('current').set('m_OUTRAreuniao'));
-  await assertFails(db.ref(`meetings/${M}/expectedParticipants`).set(99));
-  await assertFails(db.ref(`meetings/${M}/offices/${O}/status`).set('voting_open'));
-  await assertFails(db.ref(`meetings/${M}/offices/${O}/candidates/${C1}/name`).set('Outro'));
-  await assertFails(db.ref(`meetings/${M}/offices/${O}/candidates/${C2}`).remove());
-  await assertFails(db.ref(`meetings/m_NEWmeeting01`).set({ ...meeting(), id: 'm_NEWmeeting01' }));
-  // Usuário autenticado que não está em /admins também não altera nada.
-  await assertFails(strangerDb().ref(`meetings/${M}/offices/${O}/status`).set('voting_open'));
-  await assertFails(strangerDb().ref('current').set(M));
+  await assertFails(db.ref('fora-da-estrutura').set(true));
+  await assertFails(db.ref(`meetings/${M}/extra`).set('x'));
   assert.equal(await readAsRules(`meetings/${M}/offices/${O}/status`), 'discussing');
 });
 
-test('somente administradores em /admins gravam; reuniões não são apagadas; /admins é imutável', async () => {
+test('painel público cria reuniões válidas; reuniões não são sobrescritas nem apagadas', async () => {
   await seed({});
-  const db = adminDb();
+  const db = publicDb();
   await assertSucceeds(db.ref().update({ [`meetings/${M}`]: meeting('draft'), current: M }), 'cria reunião e a torna atual');
   await assertFails(db.ref('current').set('m_NAOEXISTE00'), 'atual precisa existir');
   await assertFails(db.ref(`meetings/m_bad`).set({ ...meeting(), id: 'm_bad' }), 'id inválido');
@@ -119,15 +111,11 @@ test('somente administradores em /admins gravam; reuniões não são apagadas; /
   await assertFails(db.ref(`meetings/${M}/name`).set('Outra'), 'nome fixo');
   await assertFails(db.ref(`meetings/${M}/extra`).set('x'), 'campos desconhecidos recusados');
   await assertFails(db.ref(`meetings/${M}`).remove(), 'histórico não pode ser apagado');
-  await assertFails(db.ref('admins/admin1').set(false));
-  await assertFails(strangerDb().ref('admins/qualquer-pessoa').set(true), 'ninguém se promove a admin');
-  await assertSucceeds(db.ref('admins/admin1').once('value'));
-  await assertFails(strangerDb().ref('admins/admin1').once('value'));
 });
 
 test('cargo: tipo e máximo de escolhas válidos; candidatos editáveis só antes de abrir', async () => {
   await seed({ meetings: { [M]: meeting('draft') } });
-  const db = adminDb();
+  const db = publicDb();
   const base = `meetings/${M}/offices`;
   await assertSucceeds(db.ref(`${base}/${O2}`).set(office(O2, 'draft', { voteType: 'multiple', maxChoices: 2 })));
   await assertFails(db.ref(`${base}/o_TESToffice03`).set(office('o_TESToffice03', 'draft', { voteType: 'single', maxChoices: 3 })), 'única exige 1');
@@ -147,7 +135,7 @@ test('cargo: tipo e máximo de escolhas válidos; candidatos editáveis só ante
 
 test('estados só avançam (preparação → apresentado → aberta → encerrada) e cargo encerrado é definitivo', async () => {
   await seed({ meetings: { [M]: meeting('draft') } });
-  const db = adminDb();
+  const db = publicDb();
   const st = db.ref(`meetings/${M}/offices/${O}/status`);
   await assertFails(st.set('voting_open'), 'não abre sem apresentar');
   await assertSucceeds(st.set('discussing'));
@@ -222,21 +210,15 @@ test('contadores só aceitam +1: não é possível definir, somar 2, subtrair ou
   await assertFails(db.ref(`tallies/${M}/${O}/${C1}`).remove());
   await assertFails(db.ref(`counts/${M}/${O}`).set(0));
   await assertFails(db.ref(`receipts/${M}/${O}/${rid()}`).set(123), 'marca exige horário do servidor');
-  // O administrador também não altera a apuração.
-  await assertFails(adminDb().ref(`tallies/${M}/${O}/${C1}`).set(0));
+  // Nem o painel público altera a apuração fora do incremento atômico permitido.
+  await assertFails(publicDb().ref(`tallies/${M}/${O}/${C1}`).set(0));
   assert.equal(await readAsRules(`tallies/${M}/${O}/${C1}`), 5);
 });
 
-test('votos por candidato: ocultos do público durante a votação, salvo parcial ao vivo; públicos após encerrar', async () => {
+test('apurações são públicas sem autenticação; marcas de confirmação nunca são legíveis', async () => {
   await seed({ meetings: { [M]: meeting('voting_open') }, tallies: { [M]: { [O]: { [C1]: 2 } } }, counts: { [M]: { [O]: 2 } } });
-  await assertFails(publicDb().ref(`tallies/${M}/${O}`).once('value'));
+  await assertSucceeds(publicDb().ref(`tallies/${M}/${O}`).once('value'));
   await assertFails(publicDb().ref(`receipts/${M}/${O}`).once('value'), 'marcas nunca são legíveis');
   await assertSucceeds(publicDb().ref(`counts/${M}/${O}`).once('value'), 'total de votos é público');
-  await assertSucceeds(adminDb().ref(`tallies/${M}`).once('value'));
-
-  await env.withSecurityRulesDisabled((ctx) => ctx.database().ref(`meetings/${M}/offices/${O}/liveResults`).set(true));
-  await assertSucceeds(publicDb().ref(`tallies/${M}/${O}`).once('value'), 'parcial ao vivo liberada');
-
-  await env.withSecurityRulesDisabled((ctx) => ctx.database().ref(`meetings/${M}/offices/${O}`).update({ liveResults: false, status: 'closed' }));
-  await assertSucceeds(publicDb().ref(`tallies/${M}/${O}`).once('value'), 'resultado final público');
+  await assertSucceeds(publicDb().ref(`tallies/${M}`).once('value'), 'painel acompanha a parcial sem identidade');
 });

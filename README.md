@@ -11,7 +11,7 @@ um voto por pessoa.
 | Início | `https://devtiagoro.github.io/nomeacao/` | Todos |
 | Votação pública | `.../public/votar.html` | Celulares, sem login |
 | Apresentação | `.../public/apresentacao.html` | Telão/projetor |
-| Administração | `.../public/admin.html` | Quem conduz a reunião (e-mail e senha) |
+| Administração | `.../public/admin.html` | Acesso público, sem login |
 
 ## Como funciona
 
@@ -19,10 +19,13 @@ um voto por pessoa.
   guarda os dados e avisa todas as telas a cada mudança. Não há servidor próprio.
 - O banco aponta qual é a **reunião em andamento**; votação e apresentação seguem esse ponteiro.
   Próximo cargo e nova reunião aparecem sozinhos, sem ler o QR Code de novo.
-- **Quem pode o quê** é decidido pelas regras do banco (`database.rules.json`), não pela interface:
-  - participantes leem a reunião e registram votos apenas enquanto a votação do cargo atual está aberta;
-  - só contas cadastradas em `admins/` criam reuniões e cargos, alteram nomes, abrem e encerram votações;
-  - contadores só aceitam +1; um cargo encerrado não pode mais ser alterado nem apagado, nem pelo administrador.
+- As regras do banco (`database.rules.json`) restringem formatos e transições:
+  - reuniões, cargos e candidatos precisam respeitar a estrutura esperada;
+  - votos só são registrados enquanto a votação do cargo atual está aberta;
+  - contadores só aceitam +1 e um cargo encerrado não pode mais ser alterado nem apagado.
+- **Não existe autenticação ou autorização administrativa.** Qualquer pessoa com acesso ao site ou ao
+  endereço do banco pode executar as operações administrativas permitidas pelas regras e ler as apurações.
+  A validação de formatos não protege o painel contra alterações por terceiros.
 - Cada **Confirmar voto** grava, numa operação atômica, uma cédula: +1 para cada nome marcado (ou +1
   abstenção) e +1 no total de cédulas. Uma marca única por confirmação impede que um reenvio por falha
   de rede conte duas vezes. Votar de novo de propósito é permitido.
@@ -43,18 +46,14 @@ Requer uma conta Google. Tudo pelo console do Firebase, sem custo no plano gratu
 
 1. <https://console.firebase.google.com> → **Adicionar projeto**.
 2. **Realtime Database → Criar banco de dados** (modo bloqueado).
-3. **Authentication → Método de login → E-mail/senha → Ativar.**
-4. **Configurações do projeto → Seus apps → Web (`</>`)** → copie o objeto `firebaseConfig` para
+3. **Configurações do projeto → Seus apps → Web (`</>`)** → copie o objeto `firebaseConfig` para
    `public/js/firebase-config.js` (substituindo `null`). Confira se contém `databaseURL`.
    Esses valores não são segredos.
-5. **Realtime Database → Regras** → cole o conteúdo de `database.rules.json` → **Publicar**.
+4. **Realtime Database → Regras** → cole o conteúdo de `database.rules.json` → **Publicar**.
    (Ou: `npx firebase login`, `npx firebase use --add`, `npm run deploy:rules`.)
-6. **Authentication → Users → Adicionar usuário** (e-mail e senha do administrador) e copie o **UID**.
-7. **Realtime Database → Dados** → crie `admins` → `<UID>` com valor booleano `true`.
-8. **Authentication → Settings → Authorized domains** → adicione `devtiagoro.github.io`.
-9. Faça commit e push. O GitHub Pages publica a raiz do branch `main`.
+5. Faça commit e push. O GitHub Pages publica a raiz do branch `main`.
 
-Sem os passos 4 e 5 a votação mostra "indisponível no momento" (nada é simulado).
+Sem os passos 3 e 4 a votação mostra "indisponível no momento" (nada é simulado).
 
 ## Dados
 
@@ -84,7 +83,7 @@ npm start             # pré-visualização em http://localhost:8080/
 
 Para usar o app contra o emulador (`npm run emulators`), configure temporariamente
 `public/js/firebase-config.js` com `databaseURL: 'https://demo-nomeia-default-rtdb.firebaseio.com'` e
-`emulator = { host: '127.0.0.1', databasePort: 9000, authPort: 9099 }`. Não publique assim.
+`emulator = { host: '127.0.0.1', databasePort: 9000 }`. Não publique assim.
 
 ```
 index.html                 entrada do GitHub Pages → public/index.html
@@ -100,8 +99,8 @@ public/js/admin.js votar.js apresentacao.js
 - Qualquer pessoa com o link vota, quantas vezes confirmar; o total pode superar o de presentes.
 - O limite de nomes por cédula e a regra de escolha única são verificados no aparelho; um script
   malicioso poderia burlá-los (assim como pode votar várias vezes).
-- O administrador é confiável: as regras não impedem que ele remova um nome durante a votação aberta
-  (a interface impede). Depois de encerrado, o cargo fica imutável.
+- Sem autenticação, não é possível garantir que somente quem conduz a reunião altere reuniões, cargos,
+  candidatos, estados ou resultados parciais. Depois de encerrado, o cargo fica imutável pelas regras.
 - Depende da disponibilidade do Firebase e dos CDNs (SDK do Google, QR Code no jsDelivr). O plano gratuito
   admite 100 conexões simultâneas.
 - `public/sw.js` só remove o service worker de versões anteriores; pode ser apagado depois.
